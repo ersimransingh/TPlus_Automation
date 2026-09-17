@@ -6,7 +6,7 @@
       "DESCRIPTION": "Estro (CLIENT_MASTER ,ISIN_MASTER,ISIN_RATE,SOT,SOH)",
       "EXECUTION_TIME": "17:30",
       "reporting_email": "preston75@zohomail.in",
-      "RETRY_COUNT": "4",
+      "RETRY_COUNT": "5",
       "RETRY_TIME": "2"
     },
     {
