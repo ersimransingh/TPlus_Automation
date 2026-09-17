@@ -1,0 +1,49 @@
+{
+  "SCHEDULED_TASKS": [
+    {
+      "Process_name": "Process_01",
+      "enabled": true,
+      "DESCRIPTION": "Estro (CLIENT_MASTER ,ISIN_MASTER,ISIN_RATE,SOT,SOH)",
+      "EXECUTION_TIME": "17:30",
+      "reporting_email": "preston75@zohomail.in",
+      "RETRY_COUNT": "4",
+      "RETRY_TIME": "2"
+    },
+    {
+      "Process_name": "Process_02",
+      "enabled": false,
+      "DESCRIPTION": "BOD (ISIN_MASTER)",
+      "EXECUTION_TIME": "16:25",
+      "reporting_email": "reporting_person@gmail.com",
+      "RETRY_COUNT": "4",
+      "RETRY_TIME": "4"
+    },
+    {
+      "Process_name": "Process_03",
+      "enabled": false,
+      "DESCRIPTION": "BOD (ISIN_RATE)",
+      "EXECUTION_TIME": "06:10",
+      "reporting_email": "reporting_person@gmail.com",
+      "RETRY_COUNT": "4",
+      "RETRY_TIME": "4"
+    },
+    {
+      "Process_name": "Process_04",
+      "enabled": false,
+      "DESCRIPTION": "Today (COD)",
+      "EXECUTION_TIME": "06:15",
+      "reporting_email": "reporting_person@gmail.com",
+      "RETRY_COUNT": "4",
+      "RETRY_TIME": "4"
+    },
+    {
+      "Process_name": "Process_05",
+      "enabled": false,
+      "DESCRIPTION": "Today (SOH)",
+      "EXECUTION_TIME": "06:20",
+      "reporting_email": "reporting_person@gmail.com",
+      "RETRY_COUNT": "4",
+      "RETRY_TIME": "4"
+    }
+  ] 
+}

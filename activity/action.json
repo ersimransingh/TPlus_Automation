@@ -1,0 +1,155 @@
+{
+  "app_config": {
+    "application_path": "D:\\TradePlus\\TradePlusX.exe",
+    "username": "JATIN",
+    "password": "123456"
+  },
+
+  "auto_close": true,
+
+  "execution_pipeline": [
+    {
+      "Parent_Menu": "Utilities",
+      "enabled": true,
+      "sub_pipeline": [
+        {
+          "Menu": "control_center",
+          "enabled": true,
+          "dtMain": { "value": "20260210", "control_type": "Pane", "post_delay": 3 },
+          "btnProceed": { "value": true, "control_type": "Button", "post_delay": 3 },
+
+          "file_imports": {
+            "enabled": true,
+            "btnImports": { "value": true, "control_type": "Button", "post_delay": 3 },
+            "cmbProduct": { "value": "Equity", "control_type": "ComboBox", "post_delay": 3 },
+            "cmbFileType": { "value": "UDIFF", "control_type": "ComboBox", "post_delay": 3 },
+            "dgvFileImp": { "value": true, "control_type": "DataGrid", "post_delay": 3 },
+            "matrix_checkboxes": {
+              "chkBSECash": true,
+              "chkNSECash": true,
+              "chkBSEFO": false,
+              "chkNSEFO": false,
+              "chkMCXCash": false,
+              "chkFX": false,
+              "chkSLBM": false,
+              "chkMF": false
+            },
+            "bse_files_workflow": {
+              "BSE_Cash_Broker Query": true,
+              "BSE_Cash_Obligation File (Provisional)": false,
+              "BSE_Cash_Obligation File (Final)": false,
+              "BSE_Cash_STT Details File": false,
+              "BSE_Cash_Stamp Duty File": false,
+              "BSE_Cash_Bhavcopy": false,
+              "BSE_Cash_Offer For Sale Trade File": false
+            },
+            "nse_files_workflow": {
+              "NSE_Cash_Trade File": true,
+              "NSE_Cash_Obligation File (Provisional)": true,
+              "NSE_Cash_Obligation File (Final)": false,
+              "NSE_Cash_STT Details File": false,
+              "NSE_Cash_Stamp Duty File": false,
+              "NSE_Cash_Bhavcopy": false
+            }
+          },
+
+          "others": { 
+            "enabled": true,
+            "btnProcess": { "value": true, "control_type": "Button", "post_delay": 1 },
+            "cmbExch": { "value": "NSE", "control_type": "ComboBox", "post_delay": 1 },
+            "cmbSeg": { "value": "Cash", "control_type": "ComboBox", "post_delay": 1 },
+            "cmbStlmnt": { "value": "NQ2026112", "control_type": "ComboBox", "post_delay": 1 },
+            "optPrOblComp": { "value": true, "control_type": "RadioButton", "post_delay": 1 },
+            "optPrUnProc": { "value": false, "control_type": "RadioButton", "post_delay": 1 },
+            "optPrDispObgl": { "value": false, "control_type": "RadioButton", "post_delay": 1 },
+            "optPrAccuDiff": { "value": false, "control_type": "RadioButton", "post_delay": 1 },
+            "optPrSTTMismatch": { "value": false, "control_type": "RadioButton", "post_delay": 1 },
+            "optPrBillReco": { "value": false, "control_type": "RadioButton", "post_delay": 1 },
+            "btnProcesses": { "value": true, "control_type": "Button", "post_delay": 1 }
+          },
+
+          "processes": {
+            "enabled": true,
+            "btnOthers": { "value": true, "control_type": "Button", "post_delay": 1 },
+            "cmbProcProduct": { "value": "Equity", "control_type": "ComboBox", "post_delay": 1 },
+            "dtProcess": { "value": "20260211", "control_type": "Pane", "post_delay": 1 },
+            "chkBillGenerate": { "value": true, "control_type": "CheckBox", "post_delay": 1 },
+            "chkProcAccumulate": { "value": true, "control_type": "CheckBox", "post_delay": 1 },
+            "chkAGTS": { "value": true, "control_type": "CheckBox", "post_delay": 1 },
+            "chkRemShare": { "value": true, "control_type": "CheckBox", "post_delay": 1 },
+            "chkLockBill": { "value": false, "control_type": "CheckBox", "post_delay": 1 },
+            "btnProcFetch": { "value": true, "control_type": "Button", "post_delay": 1 },
+            "dgvBillProcess": { "value": "NQ2026013", "control_type": "DataGrid", "post_delay": 1 },
+            "btnProcessProceed": { "value": true, "control_type": "Button", "post_delay": 1 },
+            "dgvBillStatus": { "value": "process completed", "control_type": "StatusGrid", "post_delay": 1 }
+          }
+        },
+
+        {
+          "Menu": "demat_processes",
+          "enabled": true,
+          "dtMain": 
+          { 
+            "value": "20260211", 
+            "control_type": "Pane", 
+            "post_delay": 1 
+          },
+          "btnHelp": 
+          { 
+            "value": true, 
+            "control_type": "Button", 
+            "post_delay": 1 
+          },
+          "dgvStlmnt": 
+          { 
+            "value": "NQ2026013", 
+            "control_type": "DataGrid", 
+            "post_delay": 1 
+          },
+          "target_process_name": 
+          { 
+            "value": "Demat Auto Entries", 
+            "control_type": "Label" 
+          },
+          "chkShowDetail": { "value": true, "control_type": "CheckBox", "post_delay": 1 },
+          "chk1By1": { "value": true, "control_type": "CheckBox", "post_delay": 1 },
+          "chkPayIn": { "value": true, "control_type": "CheckBox", "post_delay": 1 },
+          "chkPayOut": { "value": false, "control_type": "CheckBox", "post_delay": 1 },
+          "cmdFetch": { "value": true, "control_type": "Button", "post_delay": 1 },
+          "dgvDemat": { "value": true, "control_type": "DataGrid", "post_delay": 1 },
+          "screenshot_capture_directory": "D:\\TradePlus_Automation\\Capture_Data",
+          "completion_log_keyword": "process completed"
+        },
+
+        {
+          "Menu": "pledge_management",
+          "enabled": true,
+          "tabMain": { "value": "Manage", "control_type": "Tab", "post_delay": 1 },
+          "dtManageDate": { "value": "20260211", "control_type": "Pane", "post_delay": 1 },
+          "cmbManage": { "value": "Un Pledge", "control_type": "ComboBox", "post_delay": 1 },
+          "chkItemsSold": { "value": true, "control_type": "CheckBox", "post_delay": 1 },
+          "chkWithEPN": { "value": true, "control_type": "CheckBox", "post_delay": 1 },
+          "btnFetchSecurities": { "value": true, "control_type": "Button", "post_delay": 1 },
+          "btnSavePledgeData": { "value": true, "control_type": "Button", "post_delay": 1 }
+        },
+
+        {
+          "Menu": "demat_processes",
+          "enabled": true,
+          "dtMain": { "value": "20260211", "control_type": "Pane", "post_delay": 1 },
+          "btnHelp": { "value": true, "control_type": "Button", "post_delay": 1 },
+          "dgvStlmnt": { "value": "NQ2026013", "control_type": "DataGrid", "post_delay": 1 },
+          "target_process_name": { "value": "Pay-In(POA)", "control_type": "Label" },
+          "chkShowDetail": { "value": true, "control_type": "CheckBox", "post_delay": 1 },
+          "chk1By1": { "value": true, "control_type": "CheckBox", "post_delay": 1 },
+          "chkPayIn": { "value": true, "control_type": "CheckBox", "post_delay": 1 },
+          "chkPayOut": { "value": false, "control_type": "CheckBox", "post_delay": 1 },
+          "cmdFetch": { "value": true, "control_type": "Button", "post_delay": 1 },
+          "dgvDemat": { "value": true, "control_type": "DataGrid", "post_delay": 1 },
+          "screenshot_capture_directory": "D:\\TradePlus_Automation\\Capture_Data",
+          "completion_log_keyword": "process completed"
+        }
+      ]
+    }
+  ]
+}

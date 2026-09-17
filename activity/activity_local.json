@@ -1,0 +1,153 @@
+{
+  "global_app_settings": {
+    "app_path": "C:\\CDSLSecureapp\\CDSLSecureapp\\CDSLSecureapp.exe",
+    "CDSLDPID": "12028700",
+    "dp_rta_id": "CDSLDPID5",
+    "user_id": "HITESH",
+    "app_password_enc": "SkpqakBAMDc=",
+    "web_password_enc": "SkpqakBAMDc=",
+    "main_path": "D:\\CDSLFILES",
+    "file_explorer_visibility": true
+  },
+  "process_01": 
+  {
+    "cdsl_download": true,
+    "file_explorer_visibility": true,
+    "main_path": "\\\\192.168.100.110\\cdas\\Reports\\1\\28700",
+    "download_task": [
+      {
+        "module_id": "",
+        "report_id": "",
+        "business_date_from": "t-1",
+        "business_date_to": "t-1",
+        "target_file_pattern": [
+          [
+            "CLN_MSTR_CDSLDPID6_INCREMENTAL_I_",
+            "0000_999_P0.csv"
+          ],
+          [
+            "SOH_EXP_CDSLDPID6_789_D_",
+            "0000_999_C_0_0_P0.csv"
+          ],
+          [
+            "COD_EXP_CDSLDPID5_001_F",
+            "0000_999_P0.csv"
+          ]
+        ]
+      }
+    ]
+  },
+  "process_02": {
+    "cdsl_download": true,
+    "file_explorer_visibility": true,
+    "download_task": [
+      {
+        "module_id": "06",
+        "report_id": "CD24",
+        "business_date_from": "t-1",
+        "business_date_to": "t-1",
+        "target_file_pattern": [
+          [
+            "ISIN_MSTR_CDSLDPID6_00002_I_",
+            "0000_2.csv"
+          ]
+        ]
+      }
+    ]
+  },
+  "process_03": {
+    "cdsl_setup": true,
+    "cdsl_download": true,
+    "file_explorer_visibility": true,
+    "main_path": "\\\\192.168.100.110\\cdas\\Reports\\ISINRATES",
+    "setup_tasks": [
+      {
+        "module_id": "11",
+        "report_id": "DPK8",
+        "business_date_from": "t-1",
+        "business_date_to": "t-1",
+        "report_type": "Full"
+      }
+    ],
+    "download_task": [
+      {
+        "module_id": "70",
+        "report_id": "ISIN",
+        "business_date_from": "t-1",
+        "business_date_to": "t-1",
+        "target_file_pattern": [
+          [
+            "ISIN_RATE_000001_6721_F_",
+            "_01.csv.ZIP"
+          ]
+        ]
+      }
+    ]
+  },
+  "process_04": {
+    "cdsl_setup": true,
+    "cdsl_download": true,
+    "file_explorer_visibility": true,
+    "main_path": "\\\\192.168.100.110\\cdas\\Reports\\ISINRATES",
+    "setup_tasks": [
+      {
+        "module_id": "44",
+        "report_id": "DPK8",
+        "business_date_from": "t-1",
+        "business_date_to": "t-1",
+        "report_type": "Full"
+      }
+    ],
+    "download_task": [
+      {
+        "module_id": "44",
+        "report_id": "DPK8",
+        "business_date_from": "t",
+        "business_date_to": "t",
+        "target_file_pattern": [
+          [
+            "COD_EXP_CDSLDPID5_001_F",
+            "0000_999_P0.csv"
+          ]
+        ]
+      }
+    ]
+  },
+  "process_05": {
+    "cdsl_setup": true,
+    "cdsl_download": true,
+    "file_explorer_visibility": true,
+    "main_path": "\\\\192.168.100.110\\cdas\\Reports\\ISINRATES",
+    "setup_tasks": [
+      {
+        "module_id": "11",
+        "report_id": "DPK7",
+        "business_date_from": "t",
+        "business_date_to": "t",
+        "report_type": "Full"
+      }
+    ],
+    "download_task": [
+      {
+        "module_id": "11",
+        "report_id": "DPK7",
+        "business_date_from": "t",
+        "business_date_to": "t",
+        "target_file_pattern": [
+          [
+            "SOH_EXP_CDSLDPID6_789_D_",
+            "0000_999_C_0_0_P0.csv"
+          ]
+        ]
+      }
+    ]
+  },
+  "email_settings": {
+    "host": "smtp.gmail.com",
+    "port": 587,
+    "use_tls": true,
+    "username": "User@mail.com",
+    "password_enc": "",
+    "from_email": ""
+  }
+}

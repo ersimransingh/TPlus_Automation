@@ -1,0 +1,34 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.pytest_cache/
+
+# --- Virtual environments ---
+venv/
+venv.broken-DELL/
+.venv/
+
+# --- PyInstaller build artifacts ---
+build/
+dist/
+*.manifest
+
+# --- Runtime logs & output ---
+activity/Internal_log/
+activity/schedule_log/
+activity/Records/
+activity/Screenshots/
+activity/screenshot/
+activity/recordings/
+activity/Skip
+*.log
+
+
+# --- OS / editor junk ---
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp

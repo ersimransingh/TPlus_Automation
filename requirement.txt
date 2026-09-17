@@ -1,0 +1,38 @@
+license_audit.json
+
+def record_license_audit_log(cdsl_id, nsdl_id, http_status, raw_response, verification_result, days_remaining=None):
+    """
+    Saves an immutable history of every license check request including days_remaining into schedule_log/license_audit.json
+    """
+    try:
+        os.makedirs(SCHEDULER_LOGS_DIR, exist_ok=True)
+        audit_file_path = os.path.join(SCHEDULER_LOGS_DIR, "license_audit.json")
+
+        now = datetime.now()
+        audit_entry = {
+            "timestamp": now.strftime("%Y-%m-%d %H:%M:%S"),
+            "cdsl_dp_id": cdsl_id,
+            "nsdl_dp_id": nsdl_id,
+            "http_status": http_status,
+            "days_remaining": days_remaining,
+            "verification_result": verification_result,
+            "api_response": raw_response
+        }
+
+        records = []
+        if os.path.exists(audit_file_path):
+            try:
+                with open(audit_file_path, "r", encoding="utf-8") as f:
+                    records = json.load(f)
+                    if not isinstance(records, list):
+                        records = []
+            except Exception:
+                records = []
+
+        records.append(audit_entry)
+
+        with open(audit_file_path, "w", encoding="utf-8") as f:
+            json.dump(records, f, indent=2)
+
+    except Exception as err:
+        log_message(f"⚠️ Failed to write license audit log: {err}", "ERROR")

@@ -1,0 +1,62 @@
+{
+  "manager_config": {
+    "activity_json_path": "C:\\Users\\Admin\\Desktop\\Main code\\_AUTOMATION_TEST\\activity\\activity.json",
+    "timezone": "Local",
+    "global_alert_fallback": "jatingori72@gmail.com",
+    "retry_on_failure": true
+  },
+  "scheduled_tasks": [
+    {
+      "process_name": "Process_101",
+      "enabled": true,
+      "schedule_type": "daily",
+      "time": "06:30",
+      "description": "CDSL-BOD (CLIENT_MASTER , COD , SOH)",
+      "file_explorer_visibility": true,
+      "retry_count": 3,
+      "retry_time": 5,
+      "delay_times": 1,
+      "dependency": [
+        {
+          "process_name": "Process_01",
+          "date": true,
+          "time": false,
+          "result": true,
+          "task": false,
+          "status_path": "D:\\CDSL_AUTOMATION\\ACTIVITY\\Schedule_log\\log.json"
+        }
+      ],
+      "mail": {
+        "to": "jatingori72@gmail.com",
+        "cc": "",
+        "subject": "CRITICAL SCHEDULER FAILURE [Process_01]"
+      }
+    },
+    {
+      "process_name": "Process_102",
+      "enabled": false,
+      "schedule_type": "daily",
+      "time": "06:45",
+      "description": "CDSL-BOD (COD , SOH)",
+      "file_explorer_visibility": true,
+      "retry_count": 3,
+      "retry_time": 5,
+      "delay_times": 1,
+      "dependency": [
+        {
+          "process_name": "Process_02",
+          "date": true,
+          "time": false,
+          "result": true,
+          "task": false,
+          "status_path": "D:\\CDSL_AUTOMATION\\ACTIVITY\\Schedule_log\\log.json"
+        }
+      ],
+      "mail": {
+        "to": "jatingori72@gmail.com",
+        "cc": "",
+        "subject": "CRITICAL SCHEDULER FAILURE [Process_02]"
+      }
+    }
+  ]
+}
