@@ -386,6 +386,27 @@ def handle_administration(main_window, process_config, global_config=None, proce
                         logger.error(f"CRITICAL ERROR: Folder not found on disk: {final_target_directory}")
                         if recorder.is_active():
                             recorder.stop()
+                            
+                        # --- ADDED: EMAIL LOGIC FOR MISSING FOLDER ---
+                        day_folder = datetime.now().strftime("%Y-%m-%d")
+                        screenshot_folder = os.path.join(BASE_OUTPUT_DIR, day_folder, current_batch_name)
+                        os.makedirs(screenshot_folder, exist_ok=True)
+                        screenshot_path = os.path.join(screenshot_folder, f"FOLDER_NOT_FOUND_{datetime.now().strftime('%H-%M-%S')}.png")
+                        actual_saved_path = capture_screenshot(screenshot_path) or screenshot_path
+                        
+                        table_rows = [
+                            ("Process Status", "FAILED"),
+                            ("Process Name", process_name),
+                            ("Error Captured", f"Folder Not Found: {target_subfolder}"),
+                            ("Client Context", current_client_value),
+                            ("System Execution Time", current_exec_time),
+                        ]
+                        try:
+                            send_batch_report_email(smtp_config, mail_config, table_rows, actual_saved_path, f"CRITICAL ERROR: Folder Not Found - {process_name}")
+                        except Exception as email_err:
+                            pass
+                        # ---------------------------------------------
+                        
                         skip_until_next_batch = True
                         continue
 
@@ -407,6 +428,27 @@ def handle_administration(main_window, process_config, global_config=None, proce
                         logger.error(f"CRITICAL ERROR: No file matching '{target_pattern}' in '{final_target_directory}'")
                         if recorder.is_active():
                             recorder.stop()
+                            
+                        # --- ADDED: EMAIL LOGIC FOR MISSING FILE ---
+                        day_folder = datetime.now().strftime("%Y-%m-%d")
+                        screenshot_folder = os.path.join(BASE_OUTPUT_DIR, day_folder, current_batch_name)
+                        os.makedirs(screenshot_folder, exist_ok=True)
+                        screenshot_path = os.path.join(screenshot_folder, f"FILE_NOT_FOUND_{datetime.now().strftime('%H-%M-%S')}.png")
+                        actual_saved_path = capture_screenshot(screenshot_path) or screenshot_path
+                        
+                        table_rows = [
+                            ("Process Status", "FAILED"),
+                            ("Process Name", process_name),
+                            ("Error Captured", f"File Not Found: {target_pattern}"),
+                            ("Client Context", current_client_value),
+                            ("System Execution Time", current_exec_time),
+                        ]
+                        try:
+                            send_batch_report_email(smtp_config, mail_config, table_rows, actual_saved_path, f"CRITICAL ERROR: File Not Found - {process_name}")
+                        except Exception as email_err:
+                            pass
+                        # ---------------------------------------------
+                        
                         skip_until_next_batch = True
                         continue
 
