@@ -4,7 +4,7 @@
       "Process_name": "Process_01",
       "enabled": true,
       "DESCRIPTION": "Estro (CLIENT_MASTER ,ISIN_MASTER,ISIN_RATE,SOT,SOH)",
-      "EXECUTION_TIME": "17:30",
+      "EXECUTION_TIME": "14:17",
       "reporting_email": "preston75@zohomail.in",
       "RETRY_COUNT": "5",
       "RETRY_TIME": "2"
@@ -13,7 +13,7 @@
       "Process_name": "Process_02",
       "enabled": false,
       "DESCRIPTION": "BOD (ISIN_MASTER)",
-      "EXECUTION_TIME": "16:25",
+      "EXECUTION_TIME": "16:26",
       "reporting_email": "reporting_person@gmail.com",
       "RETRY_COUNT": "4",
       "RETRY_TIME": "4"
