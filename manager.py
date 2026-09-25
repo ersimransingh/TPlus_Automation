@@ -315,6 +315,40 @@ def record_license_audit_log(cdsl_id, nsdl_id, http_status, raw_response, verifi
     """
     pass
 
+def latest_result_entry(process_name):
+    """Reads log.json to find the final result written by activity.py."""
+    try:
+        summary_file_path = os.path.join(SCHEDULER_LOGS_DIR, "log.json")
+        if not os.path.exists(summary_file_path):
+            return None
+        
+        with open(summary_file_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            
+        if not isinstance(data, list):
+            return None
+            
+        clean_name = str(process_name).strip().lower()
+        matches = [
+            e for e in data 
+            if str(e.get("task") or "").strip().lower() == clean_name
+        ]
+        
+        if not matches:
+            return None
+            
+        last_entry = matches[-1]
+        status = str(last_entry.get("Status") or last_entry.get("status") or "").strip().lower()
+        
+        # Skip the manager's 'started' marker to get the real outcome from activity.py
+        if status == "started":
+            return None
+            
+        return last_entry
+    except Exception as e:
+        log_message(f"⚠️ Error reading latest result entry: {e}", "WARNING")
+        return None
+
 def write_summary_log(process_name, status_result):
     try:
         os.makedirs(SCHEDULER_LOGS_DIR, exist_ok=True)
@@ -681,13 +715,19 @@ def trigger_existing_script(process_name):
             if result.stdout:
                 log_message(f"Script stdout:\n{result.stdout.strip()}")
 
-            # CHECK BOTH EXIT CODE AND STDOUT FOR SUCCESS SIGNATURES
-            is_success = (
-                result.returncode == 0 and 
-                "❌ Automation process terminated with errors" not in combined_output and
-                "UNSUCCESS" not in combined_output
-            )
+            # --- READ THE REAL OUTCOME FROM LOG.JSON ---
+            act_entry = latest_result_entry(process_name)
+            if act_entry is not None:
+                act_status = str(act_entry.get("Status") or act_entry.get("status") or "").strip().lower()
+                is_success = (act_status == "success")
+            else:
+                is_success = (
+                    result.returncode == 0 and 
+                    "❌ Automation process terminated with errors" not in combined_output and
+                    "UNSUCCESS" not in combined_output
+                )
 
+            
             if is_success:
                 duration_delta = str(datetime.now() - start_total_time)
                 log_message(f"✅ Success: {process_name} executed successfully.", "INFO")

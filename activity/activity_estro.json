@@ -1,634 +1,153 @@
 {
-  "app_path": "C:\\Estro\\Estro.exe",
-  "backend": "uia",
-  "main_file_path": "C:\\Users\\Admin\\Desktop\\Reports",
-  "auto_close":true,
-  "email_settings":{
-    "host": "smtp.zoho.in",
+  "global_app_settings": {
+    "app_path": "C:\\CDSLSecureapp\\CDSLSecureapp\\CDSLSecureapp.exe",
+    "CDSLDPID": "12028700",
+    "dp_rta_id": "CDSLDPID5",
+    "user_id": "HITESH",
+    "app_password_enc": "SkpqakBAMDc=",
+    "web_password_enc": "SkpqakBAMDc=",
+    "main_path": "D:\\CDSLFILES",
+    "file_explorer_visibility": true
+  },
+  "process_01": 
+  {
+    "cdsl_download": true,
+    "file_explorer_visibility": true,
+    "main_path": "\\\\192.168.100.110\\cdas\\Reports\\1\\28700",
+    "download_task": [
+      {
+        "module_id": "",
+        "report_id": "",
+        "business_date_from": "t-1",
+        "business_date_to": "t-1",
+        "target_file_pattern": [
+          [
+            "CLN_MSTR_CDSLDPID6_INCREMENTAL_I_",
+            "0000_999_P0.csv"
+          ],
+          [
+            "SOH_EXP_CDSLDPID6_789_D_",
+            "0000_999_C_0_0_P0.csv"
+          ],
+          [
+            "COD_EXP_CDSLDPID5_001_F",
+            "0000_999_P0.csv"
+          ]
+        ]
+      }
+    ]
+  },
+  "process_02": {
+    "cdsl_download": true,
+    "file_explorer_visibility": true,
+    "download_task": [
+      {
+        "module_id": "06",
+        "report_id": "CD24",
+        "business_date_from": "t-1",
+        "business_date_to": "t-1",
+        "target_file_pattern": [
+          [
+            "ISIN_MSTR_CDSLDPID6_00002_I_",
+            "0000_2.csv"
+          ]
+        ]
+      }
+    ]
+  },
+  "process_03": {
+    "cdsl_setup": true,
+    "cdsl_download": true,
+    "file_explorer_visibility": true,
+    "main_path": "\\\\192.168.100.110\\cdas\\Reports\\ISINRATES",
+    "setup_tasks": [
+      {
+        "module_id": "11",
+        "report_id": "DPK8",
+        "business_date_from": "t-1",
+        "business_date_to": "t-1",
+        "report_type": "Full"
+      }
+    ],
+    "download_task": [
+      {
+        "module_id": "70",
+        "report_id": "ISIN",
+        "business_date_from": "t-1",
+        "business_date_to": "t-1",
+        "target_file_pattern": [
+          [
+            "ISIN_RATE_000001_6721_F_",
+            "_01.csv.ZIP"
+          ]
+        ]
+      }
+    ]
+  },
+  "process_04": {
+    "cdsl_setup": true,
+    "cdsl_download": true,
+    "file_explorer_visibility": true,
+    "main_path": "\\\\192.168.100.110\\cdas\\Reports\\ISINRATES",
+    "setup_tasks": [
+      {
+        "module_id": "44",
+        "report_id": "DPK8",
+        "business_date_from": "t-1",
+        "business_date_to": "t-1",
+        "report_type": "Full"
+      }
+    ],
+    "download_task": [
+      {
+        "module_id": "44",
+        "report_id": "DPK8",
+        "business_date_from": "t",
+        "business_date_to": "t",
+        "target_file_pattern": [
+          [
+            "COD_EXP_CDSLDPID5_001_F",
+            "0000_999_P0.csv"
+          ]
+        ]
+      }
+    ]
+  },
+  "process_05": {
+    "cdsl_setup": true,
+    "cdsl_download": true,
+    "file_explorer_visibility": true,
+    "main_path": "\\\\192.168.100.110\\cdas\\Reports\\ISINRATES",
+    "setup_tasks": [
+      {
+        "module_id": "11",
+        "report_id": "DPK7",
+        "business_date_from": "t",
+        "business_date_to": "t",
+        "report_type": "Full"
+      }
+    ],
+    "download_task": [
+      {
+        "module_id": "11",
+        "report_id": "DPK7",
+        "business_date_from": "t",
+        "business_date_to": "t",
+        "target_file_pattern": [
+          [
+            "SOH_EXP_CDSLDPID6_789_D_",
+            "0000_999_C_0_0_P0.csv"
+          ]
+        ]
+      }
+    ]
+  },
+  "email_settings": {
+    "host": "smtp.gmail.com",
     "port": 587,
     "use_tls": true,
-    "username": "preston75@zohomail.in",
-    "password": "YxpwK5VJb1Ww",
-    "from_email": "preston75@zohomail.in"
-  },
-  
-  "common_steps": [
-    {
-      "description": "Enter Username",
-      "control_type": "Edit",
-      "automation_id": "2",
-      "action": "type_keys",
-      "value": "admin"
-    },
-    {
-      "description": "Enter Password",
-      "control_type": "Edit",
-      "automation_id": "5",
-      "action": "type_keys",
-      "value_enc": "YWRtaW5AMTIz"
-    },
-    {
-      "description": "Click OK Button",
-      "control_type": "Button",
-      "automation_id": "3",
-      "action": "click"
-    }
-  ],
-  "Process_01": {
-    "mail": {
-      "to": "preston75@zohomail.in",
-      "cc": "",
-      "subject": "Import Report - Process_01"
-    },
-    "steps": [
-    {
-      "description": "Click Administration Menu Item",
-      "name": "Administration",
-      "control_type": "MenuItem",
-      "action": "click"
-    },
-    {
-      "description": "Click Utilities Menu Item",
-      "name": "Utilities",
-      "control_type": "MenuItem",
-      "action": "click",
-      "class_occurrence_index": 0
-    },
-    {
-      "description": "Click Import Menu Item",
-      "automation_id": "226",
-      "control_type": "MenuItem",
-      "action": "click"
-    },
-    {
-      "description": "Select Type from Red Dropdown",
-      "automation_id": "1",
-      "control_type": "ComboBox",
-      "action": "select_dropdown",
-      "value": "UDIFF"
-    },
-    
-    {
-      "description": "Click and type into Date input mask control",
-      "control_type": "Edit",
-      "class_name": "MSMaskWndClass",
-      "class_occurrence_index": 0,
-      "action": "type_date",
-      "value": "t-45"
-    },
-    {
-      "description": "Select Client Name from Yellow Dropdown",
-      "automation_id": "4",
-      "control_type": "ComboBox",
-      "action": "select_dropdown",
-      "value": "Client Master (CLN_MSTR_DPID_*.csv)" 
-    },
-    {
-      "description": "Click Browse Button",
-      "automation_id": "3",
-      "control_type": "Button",
-      "action": "click_browse",
-      "target_folder": "t-44",
-      "target_file_pattern": "CLN_MSTR_"  
-    },
-    {
-      "description": "Click Final Import Button",
-      "automation_id": "11",
-      "control_type": "Button",
-      "action": "click_import"
-    },
-    
-    {
-      "description": "Click OK Button to Confirm Import",
-      "automation_id": "4",
-      "name": "Ok",
-      "control_type": "UIA_ButtonControlTypeId (0xC350)",
-      "action": "click_ok"
-    },
-
-
-    {
-      "description": "Click and type into Date input mask control",
-      "control_type": "Edit",
-      "class_name": "MSMaskWndClass",
-      "class_occurrence_index": 0,
-      "action": "type_date",
-      "value": "t-45"
-    },
-    {
-      "description": "Select Client Name from Yellow Dropdown",
-      "automation_id": "4",
-      "control_type": "ComboBox",
-      "action": "select_dropdown",
-      "value": "ISIN (ISIN_MSTR_DPID_*.csv)" 
-    },
-    {
-      "description": "Click Browse Button",
-      "automation_id": "3",
-      "control_type": "Button",
-      "action": "click_browse",
-      "target_folder": "t-44",
-      "target_file_pattern": "ISIN_MSTR_"  
-    },
-    {
-      "description": "Click Final Import Button",
-      "automation_id": "11",
-      "control_type": "Button",
-      "action": "click_import"
-    },
-    
-    {
-      "description": "Click OK Button to Confirm Import",
-      "automation_id": "4",
-      "name": "Ok",
-      "control_type": "UIA_ButtonControlTypeId (0xC350)",
-      "action": "click_ok"
-    },
-
-    {
-      "description": "Click and type into Date input mask control",
-      "control_type": "Edit",
-      "class_name": "MSMaskWndClass",
-      "class_occurrence_index": 0,
-      "action": "type_date",
-      "value": "t-45"
-    },
-    {
-      "description": "Select Client Name from Yellow Dropdown",
-      "automation_id": "4",
-      "control_type": "ComboBox",
-      "action": "select_dropdown",
-      "value": "Transaction (SOT_Exp_DPID_*.csv)" 
-    },
-    {
-      "description": "Click Browse Button",
-      "automation_id": "3",
-      "control_type": "Button",
-      "action": "click_browse",
-      "target_folder": "t-44",
-      "folder_date_format": "%d%b%Y",
-      "target_file_pattern": "SOT_EXP",
-      "target_file_ends_with": ".csv"
-    },
-    {
-      "description": "Click Final Import Button",
-      "automation_id": "11",
-      "control_type": "Button",
-      "action": "click_import"
-    },
-    
-    {
-      "description": "Click OK Button to Confirm Import",
-      "automation_id": "4",
-      "name": "Ok",
-      "control_type": "UIA_ButtonControlTypeId (0xC350)",
-      "action": "click_ok"
-    },
-
-
-    {
-      "description": "Click and type into Date input mask control",
-      "control_type": "Edit",
-      "class_name": "MSMaskWndClass",
-      "class_occurrence_index": 0,
-      "action": "type_date",
-      "value": "t-46"
-    },
-    {
-      "description": "Select Client Name from Yellow Dropdown",
-      "automation_id": "4",
-      "control_type": "ComboBox",
-      "action": "select_dropdown",
-      "value": "ISIN RATE (ISIN_RATE_000001_03_F_YYYYMMDD.csv.txt)"
-    },
-    {
-      "description": "Click Browse Button",
-      "automation_id": "3",
-      "control_type": "Button",
-      "action": "click_browse",
-      "target_folder": "t-44",
-      "target_file_pattern": "ISIN_RATE_"  
-    },
-    {
-      "description": "Click Final Import Button",
-      "automation_id": "11",
-      "control_type": "Button",
-      "action": "click_import"
-    },
-    
-    {
-      "description": "Click OK Button to Confirm Import",
-      "automation_id": "4",
-      "name": "Ok",
-      "control_type": "UIA_ButtonControlTypeId (0xC350)",
-      "action": "click_ok"
-    },
-
-    {
-      "description": "Click and type into Date input mask control",
-      "control_type": "Edit",
-      "class_name": "MSMaskWndClass",
-      "class_occurrence_index": 0,
-      "action": "type_date",
-      "value": "t-45"
-    },
-    {
-      "description": "Select Client Name from Yellow Dropdown",
-      "automation_id": "4",
-      "control_type": "ComboBox",
-      "action": "select_dropdown",
-      "value": "Holding (SOH_EXP_DPID_*.csv)" 
-    },
-    {
-      "description": "Click Browse Button",
-      "automation_id": "3",
-      "control_type": "Button",
-      "action": "click_browse",
-      "target_folder": "t-44",
-      "target_file_pattern": "SOH_EXP_"  
-    },
-    {
-      "description": "Click Final Import Button",
-      "automation_id": "11",
-      "control_type": "Button",
-      "action": "click_import"
-    },
-   
-    {
-      "description": "Send SOH Completion Email Report",
-       "action": "send_report"
-   },
-
-    {
-      "description": "Click Window Exit Close Button",
-      "automation_id": "10",
-      "name": "Close",
-      "control_type": "Button",
-      "action": "click_close"
-    }
-
-
-    ]
-    
-  },
-   "Process_02": {
-    "mail": {
-      "to": "preston75@zohomail.in",
-      "cc": "",
-      "subject": "Import Report - Process_01"
-    },
-    "steps": [
-    {
-      "description": "Click Administration Menu Item",
-      "name": "Administration",
-      "control_type": "MenuItem",
-      "action": "click"
-    },
-    {
-      "description": "Click Utilities Menu Item",
-      "name": "Utilities",
-      "control_type": "MenuItem",
-      "action": "click",
-      "class_occurrence_index": 0
-    },
-    {
-      "description": "Click Import Menu Item",
-      "automation_id": "226",
-      "control_type": "MenuItem",
-      "action": "click"
-    },
-    {
-      "description": "Select Type from Red Dropdown",
-      "automation_id": "1",
-      "control_type": "ComboBox",
-      "action": "select_dropdown",
-      "value": "UDIFF"
-    },
-    
-    {
-      "description": "Click and type into Date input mask control",
-      "control_type": "Edit",
-      "class_name": "MSMaskWndClass",
-      "class_occurrence_index": 0,
-      "action": "type_date",
-      "value": "t-16"
-    },
-    {
-      "description": "Select Client Name from Yellow Dropdown",
-      "automation_id": "4",
-      "control_type": "ComboBox",
-      "action": "select_dropdown",
-      "value": "Transaction (SOT_Exp_DPID_*.csv)" 
-    },
-    {
-      "description": "Click Browse Button",
-      "automation_id": "3",
-      "control_type": "Button",
-      "action": "click_browse",
-      "target_folder": "t-16",
-      "target_file_pattern": "C:\\Users\\Admin\\Desktop\\Reports\\04Aug2026\\SOT_EXP_IN303575_10000000184717_F_202608041238_3_C_0_0.csv"  
-    },
-    {
-      "description": "Click Final Import Button",
-      "automation_id": "11",
-      "control_type": "Button",
-      "action": "click_import"
-    },
-    
-    {
-      "description": "Click OK Button to Confirm Import",
-      "automation_id": "4",
-      "name": "Ok",
-      "control_type": "UIA_ButtonControlTypeId (0xC350)",
-      "action": "click_ok"
-    },
-
-     {
-      "description": "Click Window Exit Close Button",
-      "automation_id": "10",
-      "name": "Close",
-      "control_type": "Button",
-      "action": "click_close"
-    }
-
-    ]
-
-  },
-
-  "Process_04": {
-    "mail": {
-      "to": "preston75@zohomail.in",
-      "cc": "",
-      "subject": "Import Report - Process_01"
-    },
-    "steps": [
-    {
-      "description": "Click Administration Menu Item",
-      "name": "Administration",
-      "control_type": "MenuItem",
-      "action": "click"
-    },
-    {
-      "description": "Click Utilities Menu Item",
-      "name": "Utilities",
-      "control_type": "MenuItem",
-      "action": "click",
-      "class_occurrence_index": 0
-    },
-    {
-      "description": "Click Import Menu Item",
-      "automation_id": "226",
-      "control_type": "MenuItem",
-      "action": "click"
-    },
-    {
-      "description": "Select Type from Red Dropdown",
-      "automation_id": "1",
-      "control_type": "ComboBox",
-      "action": "select_dropdown",
-      "value": "UDIFF"
-    },
-    
-    {
-      "description": "Click and type into Date input mask control",
-      "control_type": "Edit",
-      "class_name": "MSMaskWndClass",
-      "class_occurrence_index": 0,
-      "action": "type_date",
-      "value": "t-17"
-    },
-    {
-      "description": "Select Client Name from Yellow Dropdown",
-      "automation_id": "4",
-      "control_type": "ComboBox",
-      "action": "select_dropdown",
-      "value": "Holding (SOH_EXP_DPID_*.csv)" 
-    },
-    {
-      "description": "Click Browse Button",
-      "automation_id": "3",
-      "control_type": "Button",
-      "action": "click_browse",
-      "target_folder": "t-17",
-      "target_file_pattern": "SOH_EXP_"  
-    },
-    {
-      "description": "Click Final Import Button",
-      "automation_id": "11",
-      "control_type": "Button",
-      "action": "click_import"
-    },
-   
-    {
-      "description": "Click and type into Date input mask control",
-      "control_type": "Edit",
-      "class_name": "MSMaskWndClass",
-      "class_occurrence_index": 0,
-      "action": "type_date",
-      "value": "t-17"
-    },
-    {
-      "description": "Select Client Name from Yellow Dropdown",
-      "automation_id": "4",
-      "control_type": "ComboBox",
-      "action": "select_dropdown",
-      "value": "Holding (SOH_EXP_DPID_*.csv)" 
-    },
-    {
-      "description": "Click Browse Button",
-      "automation_id": "3",
-      "control_type": "Button",
-      "action": "click_browse",
-      "target_folder": "t-17",
-      "target_file_pattern": "SOH_EXP_"  
-    },
-    {
-      "description": "Click Final Import Button",
-      "automation_id": "11",
-      "control_type": "Button",
-      "action": "click_import"
-    },
-   {
-      "description": "Click and type into Date input mask control",
-      "control_type": "Edit",
-      "class_name": "MSMaskWndClass",
-      "class_occurrence_index": 0,
-      "action": "type_date",
-      "value": "t-17"
-    },
-    {
-      "description": "Select Client Name from Yellow Dropdown",
-      "automation_id": "4",
-      "control_type": "ComboBox",
-      "action": "select_dropdown",
-      "value": "Holding (SOH_EXP_DPID_*.csv)" 
-    },
-    {
-      "description": "Click Browse Button",
-      "automation_id": "3",
-      "control_type": "Button",
-      "action": "click_browse",
-      "target_folder": "t-17",
-      "target_file_pattern": "SOH_EXP_"  
-    },
-    {
-      "description": "Click Final Import Button",
-      "automation_id": "11",
-      "control_type": "Button",
-      "action": "click_import"
-    },
-   {
-      "description": "Click and type into Date input mask control",
-      "control_type": "Edit",
-      "class_name": "MSMaskWndClass",
-      "class_occurrence_index": 0,
-      "action": "type_date",
-      "value": "t-17"
-    },
-    {
-      "description": "Select Client Name from Yellow Dropdown",
-      "automation_id": "4",
-      "control_type": "ComboBox",
-      "action": "select_dropdown",
-      "value": "Holding (SOH_EXP_DPID_*.csv)" 
-    },
-    {
-      "description": "Click Browse Button",
-      "automation_id": "3",
-      "control_type": "Button",
-      "action": "click_browse",
-      "target_folder": "t-17",
-      "target_file_pattern": "SOH_EXP_"  
-    },
-    {
-      "description": "Click Final Import Button",
-      "automation_id": "11",
-      "control_type": "Button",
-      "action": "click_import"
-    },
-   {
-      "description": "Click and type into Date input mask control",
-      "control_type": "Edit",
-      "class_name": "MSMaskWndClass",
-      "class_occurrence_index": 0,
-      "action": "type_date",
-      "value": "t-17"
-    },
-    {
-      "description": "Select Client Name from Yellow Dropdown",
-      "automation_id": "4",
-      "control_type": "ComboBox",
-      "action": "select_dropdown",
-      "value": "Holding (SOH_EXP_DPID_*.csv)" 
-    },
-    {
-      "description": "Click Browse Button",
-      "automation_id": "3",
-      "control_type": "Button",
-      "action": "click_browse",
-      "target_folder": "t-17",
-      "target_file_pattern": "SOH_EXP_"  
-    },
-    {
-      "description": "Click Final Import Button",
-      "automation_id": "11",
-      "control_type": "Button",
-      "action": "click_import"
-    },
-   
-    {
-      "description": "Click Window Exit Close Button",
-      "automation_id": "10",
-      "name": "Close",
-      "control_type": "Button",
-      "action": "click_close"
-    }
-
-  ]
-},
-
-    "Process_03": {
-    "mail": {
-      "to": "preston75@zohomail.in",
-      "cc": "",
-      "subject": "Import Report - Process_01"
-    },
-    "steps": [
-    {
-      "description": "Click Administration Menu Item",
-      "name": "Administration",
-      "control_type": "MenuItem",
-      "action": "click"
-    },
-    {
-      "description": "Click Utilities Menu Item",
-      "name": "Utilities",
-      "control_type": "MenuItem",
-      "action": "click",
-      "class_occurrence_index": 0
-    },
-    {
-      "description": "Click Import Menu Item",
-      "automation_id": "226",
-      "control_type": "MenuItem",
-      "action": "click"
-    },
-    {
-      "description": "Select Type from Red Dropdown",
-      "automation_id": "1",
-      "control_type": "ComboBox",
-      "action": "select_dropdown",
-      "value": "UDIFF"
-    },
-    
-    {
-      "description": "Click and type into Date input mask control",
-      "control_type": "Edit",
-      "class_name": "MSMaskWndClass",
-      "class_occurrence_index": 0,
-      "action": "type_date",
-      "value": "t-45"
-    },
-    {
-      "description": "Select Client Name from Yellow Dropdown",
-      "automation_id": "4",
-      "control_type": "ComboBox",
-      "action": "select_dropdown",
-      "value": "Client Master (CLN_MSTR_DPID_*.csv)" 
-    },
-    {
-      "description": "Click Browse Button",
-      "automation_id": "3",
-      "control_type": "Button",
-      "action": "click_browse",
-      "target_folder": "t-44",
-      "target_file_pattern": "CLN_MSTR_"  
-    },
-    {
-      "description": "Click Final Import Button",
-      "automation_id": "11",
-      "control_type": "Button",
-      "action": "click_import"
-    },
-
-    {
-      "description": "Click OK Button to Confirm Import",
-      "automation_id": "4",
-      "name": "Ok",
-      "control_type": "UIA_ButtonControlTypeId (0xC350)",
-      "action": "click_ok"
-    },
-
-    {
-      "description": "Click Window Exit Close Button",
-      "automation_id": "10",
-      "name": "Close",
-      "control_type": "Button",
-      "action": "click_close"
-    }
-
-    ]
-  
+    "username": "User@mail.com",
+    "password_enc": "",
+    "from_email": ""
   }
-  
 }

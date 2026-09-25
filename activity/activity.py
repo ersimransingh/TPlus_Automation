@@ -67,6 +67,68 @@ RESERVED_KEYS = {
 }
 
 
+# --- Shared task-result ledger (log.json) -----------------------------------
+def default_log_json_path():
+    return os.path.join(SCRIPT_DIR, "schedule_log", "log.json")
+
+def resolve_log_json_path():
+    target_path = get_cli_arg("--config") or get_cli_arg("-c")
+    try:
+        if target_path and os.path.exists(target_path):
+            with open(target_path, 'r', encoding='utf-8') as f:
+                cfg = json.load(f)
+            override = cfg.get("log_json")
+            if override:
+                if os.path.isabs(override):
+                    return override
+                return os.path.join(SCRIPT_DIR, override)
+    except Exception:
+        pass
+    return default_log_json_path()
+
+def get_log_json_path():
+    if not hasattr(get_log_json_path, "_cached"):
+        get_log_json_path._cached = resolve_log_json_path()
+    return get_log_json_path._cached
+
+def load_log_ledger():
+    ledger_path = get_log_json_path()
+    if not os.path.exists(ledger_path):
+        return []
+    try:
+        with open(ledger_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+def append_log_entry(entry):
+    ledger_path = get_log_json_path()
+    try:
+        os.makedirs(os.path.dirname(ledger_path), exist_ok=True)
+        entries = load_log_ledger()
+        entries.append(entry)
+        tmp_path = ledger_path + ".tmp"
+        with open(tmp_path, 'w', encoding='utf-8') as f:
+            json.dump(entries, f, indent=2)
+        os.replace(tmp_path, ledger_path)
+    except Exception as err:
+        logger.warning(f"Failed to append activity ledger entry: {err}")
+
+def write_activity_result(process_name, ok, reason=""):
+    """Record the real business outcome for a process in the shared ledger."""
+    now = datetime.now()
+    entry = {
+        "date": now.strftime("%d-%b-%Y"),
+        "task": process_name,
+        "Status": "success" if ok else "unsuccess",
+        "time": now.strftime("%H:%M:%S"),
+    }
+    append_log_entry(entry)
+    logger.info(f"Ledger result recorded for '{process_name}': {'success' if ok else 'failure'}")
+
+
+
 def resolve_password_value(val):
     """
     Safely resolves Base64 encoded or plain text passwords.
@@ -394,11 +456,25 @@ def run_universal_automation():
             logger.info("Login sequence finalized. Waiting for desktop workspace interface...")
             time.sleep(4.0)
 
-            # Run process sequence
+            
+           # Run process sequence
             logger.info(f"=== Starting process execution: '{matched_key}' ===")
-            handle_administration(main_window, process_data, global_config=master_config, process_name=matched_key)
+            import_failed = False
+            failure_reason = ""
+            try:
+                # Capture the verdict returned from administration_page
+                result = handle_administration(main_window, process_data, global_config=master_config, process_name=matched_key)
+                if result and isinstance(result, tuple):
+                    import_failed, failure_reason = bool(result[0]), str(result[1] or "")
+            except Exception as proc_err:
+                import_failed = True
+                failure_reason = f"Process execution raised: {proc_err}"
+                logger.error(f"Process execution failed: {proc_err}")
             logger.info(f"=== Process execution completed: '{matched_key}' ===")
 
+            # Write the result to schedule_log/log.json
+            write_activity_result(matched_key, ok=not import_failed, reason=failure_reason)
+            
             # Check auto_close setting
             auto_close_flag = master_config.get("auto_close", False)
             if auto_close_flag:
@@ -431,6 +507,11 @@ def run_universal_automation():
                 except Exception as close_err:
                     logger.warning(f"Auto-close fallback: {close_err}")
                     send_keys("{LEFT}{ENTER}")
+
+        # Hard exit if failure occurred so manager registers the failure
+            if import_failed:
+                logger.error("Automation process terminated with errors (import_failed).")
+                sys.exit(1)
 
         finally:
             if full_execution_recorder.is_active():

@@ -69,7 +69,7 @@ def resolve_password_value(val):
             return decoded_str
         return clean_val
     except Exception:
-        return clean_val
+        return clean_val    
 
 def parse_relative_date(date_token, date_format="%d%m%Y"):
     """
@@ -122,7 +122,9 @@ def handle_administration(main_window, process_config, global_config=None, proce
 
     skip_until_next_batch = False
     import_failed = False
+    overall_process_failed = False  # <-- LOG REPORT
     failure_reason = ""
+
 
     # Helper to resolve SMTP settings cleanly across configurations
     smtp_config = (global_config or {}).get("email_settings") or (global_config or {}).get("smtp_config") or {}
@@ -208,9 +210,36 @@ def handle_administration(main_window, process_config, global_config=None, proce
             ctrl_type = step.get('control_type', 'Button')
 
             if skip_until_next_batch:
-                if action in ["select_dropdown", "switch_tab", "click_close"]:
+                # 1. Added 'type_date' so the engine resets properly for the ISIN file
+                if action in ["type_date", "select_dropdown", "switch_tab", "click_close"]:
                     logger.info(f"Resetting error bypass flag. Found next setup action configuration entry: {action}")
                     skip_until_next_batch = False
+
+                    # 2. Latch the overall failure for the Manager Summary, but reset local flags
+                    if import_failed:
+                        overall_process_failed = True
+                    import_failed = False
+                    failure_reason = ""
+                    
+                    # ====================================================
+                    # PRE-FLIGHT SWEEP: DESTROY GHOST WINDOWS BEFORE STARTING
+                    # ====================================================
+                    try:
+                        target_pid = main_window.process_id()
+                        desktop_win32 = Desktop(backend="win32")
+                        for leftover_win in desktop_win32.windows(visible_only=True):
+                            if leftover_win.process_id() == target_pid:
+                                w_title = leftover_win.window_text()
+                                if "report" in w_title.lower() and "estro" not in w_title.lower().strip()[:5]:
+                                    logger.info(f"Pre-flight sweep caught hidden ghost window: {w_title}. Destroying...")
+                                    try:
+                                        leftover_win.close()
+                                        time.sleep(0.4)
+                                    except Exception:
+                                        pass
+                    except Exception as sweep_err:
+                        logger.debug(f"Pre-flight sweep bypassed: {sweep_err}")
+                    # ====================================================
                 else:
                     logger.info(f"Skipping dependency step due to previous File-Not-Found state: {desc}")
                     continue
@@ -407,6 +436,10 @@ def handle_administration(main_window, process_config, global_config=None, proce
                             pass
                         # ---------------------------------------------
                         
+                        import_failed = True
+                        overall_process_failed = True
+                        failure_reason = f"Folder Not Found: {target_subfolder}"
+
                         skip_until_next_batch = True
                         continue
 
@@ -585,238 +618,245 @@ def handle_administration(main_window, process_config, global_config=None, proce
             # 6. DYNAMIC ACTION BUTTON CLICK (IMPORT / PROCESS)
             # ============================================================
             elif action == "click_import":
-                    logger.info(f"Executing Process Confirmation Target Step: {desc}")
+                logger.info(f"Executing Process Confirmation Target Step: {desc}")
+                try:
+                    import_window = _get_target_window(step)
+                    if auto_id:
+                        import_action_btn = import_window.child_window(auto_id=str(auto_id), control_type=ctrl_type)
+                    else:
+                        btn_title = step.get('title') or step.get('text', 'Import')
+                        import_action_btn = import_window.child_window(title_re=f"(?i).*{re.escape(btn_title)}.*", control_type=ctrl_type)
+
+                    import_action_btn.set_focus()
+                    time.sleep(0.2)
+                    target_pid = main_window.process_id()
+                    import_action_btn.click()
+                    logger.info("Successfully clicked Import control.")
+
+                    # Lookahead Radar: Cross (wait_for_table) vs Estro (OS polling)
+                    next_action = ""
+                    if index + 1 < len(other_steps):
+                        next_action = other_steps[index + 1].get('action')
+
+                    if next_action == "wait_for_table":
+                        logger.info("Engine Auto-Detect: Grid UI (Cross). Applying static buffer...")
+                        time.sleep(3.0)
+                    else:
+                        logger.info("Engine Auto-Detect: Locked-thread UI. Initiating OS polling...")
+                        max_wait_seconds = 10800
+                        start_time = time.time()
+                        time.sleep(3.0)
+                        desktop_spy = Desktop(backend="uia")
+                        while (time.time() - start_time) < max_wait_seconds:
+                            try:
+                                active_windows = desktop_spy.windows(process=target_pid)
+                                popup_detected = False
+                                for win in active_windows:
+                                    win_text = str(win.window_text()).strip()
+                                    if any(k in win_text for k in ["Information", "Message", "Success", "Sucess", "Estro", "Error", "Fatal"]):
+                                        popup_detected = True
+                                        break
+                                if popup_detected or import_window.is_enabled():
+                                    break
+                            except Exception:
+                                pass
+                            time.sleep(0.5)
+
+                    desktop = Desktop(backend="uia")
                     try:
-                        import_window = _get_target_window(step)
-                        
-                        if auto_id:
-                            import_action_btn = import_window.child_window(auto_id=str(auto_id), control_type=ctrl_type)
-                        else:
-                            btn_title = step.get('title') or step.get('text', 'Import')
-                            import_action_btn = import_window.child_window(title_re=f"(?i).*{re.escape(btn_title)}.*", control_type=ctrl_type)
-
-                        import_action_btn.set_focus()
-                        time.sleep(0.2)
-
-                        # 1. Grab PID before clicking so the engine remembers it before the freeze
-                        target_pid = main_window.process_id()
-
-                        import_action_btn.click()
-                        logger.info("Successfully requested document structural engine processing via final file Import control.")
-                        
-                        # ========================================================
-                        # 🚀 NEW: THE LOOKAHEAD RADAR (Cross vs Estro Router)
-                        # ========================================================
-                        next_action = ""
-                        # Peek at the very next step in the JSON array
-                        if index + 1 < len(other_steps):
-                            next_action = other_steps[index + 1].get('action')
-
-                        if next_action == "wait_for_table":
-                            logger.info("Engine Auto-Detect: Grid-based UI (Cross). Applying 3-second static buffer...")
-                            time.sleep(3.0)
-                        else:
-                            logger.info("Engine Auto-Detect: Locked-thread UI (Estro / Compliance Sutra). Initiating dynamic OS polling...")
-                            max_wait_seconds = 10800 # 3-hour safety net
-                            start_time = time.time()
-                            time.sleep(3.0) # Buffer to allow application to freeze
-                            
-                            desktop_spy = Desktop(backend="uia")
-
-                            while (time.time() - start_time) < max_wait_seconds:
+                        fatal_dialog = desktop.window(
+                            title_re=r"(?i).*(Cross|Information|Message|Confirmation|Notice|Alert|Error|Warning|Fatal|Estro).*",
+                            control_type="Window",
+                            top_level_only=True,
+                            process=target_pid
+                        )
+                        if fatal_dialog.exists(timeout=1.5):
+                            # Read window title and all inner labels
+                            body_texts = [fatal_dialog.window_text()]
+                            for ctrl in fatal_dialog.descendants():
                                 try:
-                                    # Break if ANY popup appears (Success OR Error)
-                                    active_windows = desktop_spy.windows(process=target_pid)
-                                    popup_detected = False
-                                    for win in active_windows:
-                                        win_text = str(win.window_text()).strip()
-                                        # (Kept your custom "Sucess" spelling catch here!)
-                                        if any(keyword in win_text for keyword in ["Information", "Message", "Success","Sucess","Estro", "Error", "Fatal"]):
-                                            popup_detected = True
-                                            break
-                                    if popup_detected:
-                                        break
-
-                                    # Break if main window naturally unfreezes (silent success)
-                                    if import_window.is_enabled():
-                                        break
+                                    t = ctrl.window_text()
+                                    if t: body_texts.append(t)
                                 except Exception:
-                                    pass # Swallow Pywinauto COM errors while frozen
-                                
-                                time.sleep(0.5) 
-                        # ========================================================
-                        
-                        desktop = Desktop(backend="uia")
-                        
-                        try:
-                            fatal_dialog = desktop.window(title_re="(?i).*(fatal|error).*", control_type="Window", top_level_only=True)
-                            if fatal_dialog.exists(timeout=1.5):
-                                failure_reason = fatal_dialog.window_text()
+                                    pass
+                            popup_text = " ".join(body_texts).lower()
+
+                            if any(k in popup_text for k in ["error", "fatal", "warning", "fail", "invalid", "unsuccess", "mismatch"]):
+                                failure_reason = str(fatal_dialog.window_text()).strip()
                                 logger.warning(f"Detected Application Error Layer Context: '{failure_reason}'")
-                                
                                 fatal_dialog.set_focus()
                                 time.sleep(0.2)
-                                send_keys("{ENTER}")
+                                send_keys("{ENTER}") # Closes the small popup
+                                
                                 import_failed = True
                                 time.sleep(2.0)
-                        except Exception as dialog_check_err:
-                            logger.debug(f"No explicit error frame intercepted: {dialog_check_err}")
+                    except Exception as dialog_check_err:
+                        logger.debug(f"No explicit error frame intercepted: {dialog_check_err}")
 
-                        if import_failed:
-                            logger.info("Fatal Error intercepted. Closing error notification window...")
-                            try:
-                                close_id = step.get('error_close_autoid')
-                                close_cls = step.get('error_class_name')
-                                
-                                if close_cls:
-                                    error_tab = main_window.window(class_name=close_cls, top_level_only=False, found_index=0)
-                                    error_tab.set_focus()
-                                    time.sleep(0.2)
-                                    if close_id:
-                                        error_tab.child_window(auto_id=str(close_id), control_type="Button").click_input()
-                                    else:
-                                        send_keys("%{c}")
-                                else:
-                                    send_keys("%{c}")
-                            except Exception:
-                                send_keys("%{c}")
-                                
-                            if recorder.is_active():
-                                recorder.stop()
+                    if import_failed:
+                        logger.info("Fatal Error intercepted. Closing container...")
+                        try:
+                            send_keys("%{c}")
+                        except Exception:
+                            pass
 
-                            day_folder = datetime.now().strftime("%Y-%m-%d")
-                            screenshot_folder = os.path.join(BASE_OUTPUT_DIR, day_folder, current_batch_name)
-                            os.makedirs(screenshot_folder, exist_ok=True)
-                            screenshot_path = os.path.join(screenshot_folder, f"IMPORT_FAILURE_CAPTURE_{datetime.now().strftime('%H-%M-%S')}.png")
-                            capture_screenshot(screenshot_path)
+                        if recorder.is_active():
+                            recorder.stop()
 
-                            table_rows = [
-                                ("Process Status", "FAILED - TRANSACTION ERROR"),
-                                ("Process Name", process_name),
-                                ("Error Captured", failure_reason if failure_reason else "No transaction is active"),
-                                ("Client Context", current_client_value),
-                                ("System Execution Time", current_exec_time),
-                            ]
-                            
-                            try:
-                                send_batch_report_email(
-                                    smtp_config=smtp_config,
-                                    mail_config=mail_config,
-                                    table_rows=table_rows,
-                                    screenshot_path=screenshot_path,
-                                    default_subject=f"CRITICAL ERROR: Import Failed - {process_name}",
-                                )
-                            except Exception as email_err:
-                                logger.error(f"Failed to transmit error alert email: {email_err}")
+                        day_folder = datetime.now().strftime("%Y-%m-%d")
+                        screenshot_folder = os.path.join(BASE_OUTPUT_DIR, day_folder, current_batch_name or "Unknown_Batch")
+                        os.makedirs(screenshot_folder, exist_ok=True)
+                        screenshot_path = os.path.join(screenshot_folder, f"IMPORT_FAILURE_CAPTURE_{datetime.now().strftime('%H-%M-%S')}.png")
+                        actual_saved_path = capture_screenshot(screenshot_path) or screenshot_path
 
-                            skip_until_next_batch = True
-                            continue
-                        else:
-                            time.sleep(1.0) 
-                        
-                    except Exception as e:
-                        logger.error(f"Failed handling post-browse main automation execution button trigger sequence: {e}", exc_info=True)
-                        raise RuntimeError(f"Failed handling post-browse main automation execution button trigger sequence: {e}") 
+                        table_rows = [
+                            ("Process Status", "FAILED - TRANSACTION ERROR"),
+                            ("Process Name", process_name),
+                            ("Error Captured", failure_reason or "Application Data Error"),
+                            ("Client Context", current_client_value),
+                            ("System Execution Time", current_exec_time),
+                        ]
+
+                        try:
+                            send_batch_report_email(
+                                smtp_config=smtp_config,
+                                mail_config=mail_config,
+                                table_rows=table_rows,
+                                screenshot_path=actual_saved_path,
+                                default_subject=f"CRITICAL ERROR: Import Failed - {process_name}",
+                            )
+                        except Exception as email_err:
+                            logger.error(f"Failed to transmit error alert email: {email_err}")
+
+                        skip_until_next_batch = True
+                        continue
+                    else:
+                        time.sleep(1.0)
+                except Exception as e:
+                    logger.error(f"Failed handling click_import sequence: {e}", exc_info=True)
+                    raise RuntimeError(f"Failed handling click_import sequence: {e}")
             # ============================================================
             # 7. DYNAMIC TABLE GRID LOAD VERIFIER
             # ============================================================
             elif action == "wait_for_table":
                 logger.info(f"Executing Table Loading Verification Step: {desc}")
                 try:
-                    import_window = _get_target_window(step)
+                    logger.info("Waiting dynamically for data grid to populate (bypassing 'Not Responding' UI freezes)...")
                     
-                    if auto_id:
-                        table_grid = import_window.child_window(auto_id=str(auto_id), control_type=ctrl_type)
-                    else:
-                        grid_cls = step.get('class_name', 'MSHFlexGridWndClass')
-                        table_grid = import_window.child_window(class_name=grid_cls, control_type=ctrl_type, found_index=0)
+                    max_timeout = step.get('timeout', 300) 
+                    start_time = time.time()
+                    table_ready = False
+                    
+                    while (time.time() - start_time) < max_timeout:
+                        try:
+                            import_window = _get_target_window(step)
+                            
+                            if auto_id:
+                                table_grid = import_window.child_window(auto_id=str(auto_id), control_type=ctrl_type)
+                            else:
+                                grid_cls = step.get('class_name', 'MSHFlexGridWndClass')
+                                table_grid = import_window.child_window(class_name=grid_cls, control_type=ctrl_type, found_index=0)
 
-                    logger.info("Waiting for data grid table initialization...")
-                    table_grid.wait('exists', timeout=step.get('timeout', 30))
-                    table_grid.wait('ready', timeout=step.get('timeout', 30))
+                            # RESTORED: Native strict check. 
+                            # If app is frozen/processing, this will purposefully fail and trigger the 'except' block
+                            table_grid.wait('exists', timeout=2)
+                            table_grid.wait('ready', timeout=2)
+                            
+                            # If it gets here without throwing an error, the thread is genuinely unlocked
+                            table_ready = True
+                            break
+                        except Exception:
+                            # Safely swallow TimeoutError and ElementNotFoundError while app processes
+                            pass
+                            
+                        time.sleep(2.0)
+                        
+                    if not table_ready:
+                        raise TimeoutError(f"Table did not load after {max_timeout} seconds.")
+
                     time.sleep(1.5)
                     logger.info("Data table successfully loaded and populated with imported values.")
                 except Exception as e:
                     logger.error(f"Failed while waiting for processing table to display records: {e}", exc_info=True)
+                    overall_process_failed = True
                     raise RuntimeError(f"Failed while waiting for processing table to display records: {e}")
-
             # ============================================================
             # 8. DYNAMIC CONFIRMATION / MULTI-DIALOG OK CLICK HANDLER
             # ============================================================
             elif action == "click_ok":
                 logger.info(f"Executing Process Confirmation Target Step: {desc}")
-                desktop = Desktop(backend="uia")
-                target_pid = main_window.process_id()
-                
-                # Check up to 5 consecutive dialog popups (handles consecutive error/info popups)
+                # MUST BE WIN32 TO READ VB6 DIALOG TEXT
+                desktop = Desktop(backend="win32")
+
                 max_dialog_checks = step.get('max_popup_count', 5)
                 dialogs_cleared = 0
 
                 for check_idx in range(1, max_dialog_checks + 1):
                     logger.info(f"Polling for active pop-up dialog window (Attempt {check_idx}/{max_dialog_checks})...")
                     btn_clicked = False
+                    active_dialog = None
 
-                    # Strategy 1: Search top-level modal popups strictly within target application PID
-                    try:
-                        dialog_title_cfg = step.get('dialog_title') or step.get('window_title')
-                        if dialog_title_cfg:
-                            active_dialog = desktop.window(
-                                title_re=f"(?i).*{re.escape(dialog_title_cfg)}.*", 
-                                top_level_only=True, 
-                                process=target_pid
-                            )
-                        else:
-                            active_dialog = desktop.window(
-                                title_re=r"(?i).*(Cross|Information|Message|Confirmation|Notice|Alert|Error|Warning|Fatal).*", 
-                                top_level_only=True, 
-                                process=target_pid
-                            )
+                    # Win32 Window Search to catch hidden legacy dialogs
+                    for win in desktop.windows():
+                        try:
+                            w_title = win.window_text()
+                            w_cls = win.class_name()
+                            if re.search(r"(?i).*(Cross|Information|Message|Confirmation|Notice|Alert|Error|Warning|Fatal|Report|#32770).*", w_title) or w_cls in ["#32770", "ThunderRT6FormDC"]:
+                                if win.is_visible():
+                                    active_dialog = win
+                                    break
+                        except Exception:
+                            continue
 
-                        if active_dialog.exists(timeout=2):
+                    if active_dialog:
+                        try:
                             active_dialog.set_focus()
                             time.sleep(0.3)
 
-                            # Find target button inside modal
-                            if auto_id:
-                                target_btn = active_dialog.child_window(auto_id=str(auto_id), control_type=ctrl_type)
-                            else:
-                                btn_title = step.get('title') or step.get('text', 'OK')
-                                target_btn = active_dialog.child_window(title_re=f"(?i).*{re.escape(btn_title)}.*", control_type=ctrl_type)
+                           # Radar: Scan all text inside the dialog's child labels
+                            body_texts = [active_dialog.window_text()]
+                            clean_report_text = ""
+                            
+                            for ctrl in active_dialog.descendants():
+                                try:
+                                    t = ctrl.window_text().strip()
+                                    if t: 
+                                        body_texts.append(t)
+                                    if ctrl.class_name() == "RichTextWndClass":
+                                        clean_report_text = t
+                                except Exception:
+                                    pass
+                                    
+                            full_popup_text = " ".join(body_texts).lower()
 
+                            if any(word in full_popup_text for word in ["error", "fatal", "warning", "fail", "invalid", "not found", "unsuccess", "mismatch"]):
+                                logger.warning("Tampered file error caught in modal.")
+                                import_failed = True
+                                overall_process_failed = True
+                                
+                                if clean_report_text:
+                                    failure_reason = clean_report_text.replace('\n', ' ').replace('\r', '').strip()
+                                else:
+                                    failure_reason = f"Application Data Error: {active_dialog.window_text().strip()}"
+
+                            # Click OK / Yes / Close
+                            btn_title = step.get('title') or step.get('text', 'OK')
+                            target_btn = active_dialog.child_window(title_re=f"(?i).*{re.escape(btn_title)}.*", class_name="Button")
                             if not target_btn.exists():
-                                target_btn = active_dialog.child_window(title_re=r"(?i).*(OK|Yes|Close|Dismiss).*", control_type="Button")
+                                target_btn = active_dialog.child_window(title_re=r"(?i).*(OK|Yes|Close|Dismiss).*", class_name="Button")
 
-                            if target_btn.exists(timeout=1):
-                                logger.info(f"🖱️ Clicking button '{target_btn.window_text()}' inside popup dialog #{check_idx}...")
-                                target_btn.click_input()
+                            if target_btn.exists():
+                                target_btn.click()
                                 dialogs_cleared += 1
                                 btn_clicked = True
                                 time.sleep(1.2)
-                    except Exception as modal_err:
-                        logger.debug(f"Modal popup search iteration {check_idx}: {modal_err}")
+                        except Exception as win32_err:
+                            logger.debug(f"Win32 dialog inspect error: {win32_err}")
 
-                    # Strategy 2: Search inside main_window children
-                    if not btn_clicked:
-                        try:
-                            if auto_id:
-                                target_btn = main_window.child_window(auto_id=str(auto_id), control_type=ctrl_type)
-                            else:
-                                btn_title = step.get('title') or step.get('text', 'OK')
-                                target_btn = main_window.child_window(title_re=f"(?i).*{re.escape(btn_title)}.*", control_type=ctrl_type)
-
-                            if target_btn.exists(timeout=1):
-                                logger.info(f"🖱️ Clicking button inside main window context (Popup #{check_idx})...")
-                                target_btn.click_input()
-                                dialogs_cleared += 1
-                                btn_clicked = True
-                                time.sleep(1.2)
-                        except Exception:
-                            pass
-
-                    # Strategy 3: Single modal dismissal via ENTER keypress
+                    # Fallback keypress dismissal
                     if not btn_clicked:
                         if check_idx == 1:
-                            logger.info("No explicit button caught via UIA. Sending Enter keypress to clear active modal...")
+                            logger.info("Sending Enter keypress fallback...")
                             send_keys("{ENTER}")
                             dialogs_cleared += 1
                             time.sleep(1.0)
@@ -825,37 +865,83 @@ def handle_administration(main_window, process_config, global_config=None, proce
 
                 logger.info(f"✓ Cleared total of {dialogs_cleared} pop-up dialog window(s).")
 
+                # ====================================================
+                # WIN32 AGGRESSIVE SWEEP AND DESTROY POST-OK
+                # ====================================================
+                logger.info("Sweeping strictly for secondary white report windows post-OK...")
+                time.sleep(1.5)
+                try:
+                    target_pid = main_window.process_id()
+                    desktop_win32 = Desktop(backend="win32") 
+                    
+                    for leftover_win in desktop_win32.windows(visible_only=True):
+                        # Match the exact PID to avoid closing random PC apps
+                        if leftover_win.process_id() == target_pid:
+                            w_title = leftover_win.window_text()
+                            
+                            # STRICT FILTER: Only destroy windows that contain "Report" in the title
+                            # This completely protects the main "Estro" application from accidental Alt+F4 closures
+                            if "report" in w_title.lower() and "estro" not in w_title.lower().strip()[:5]:
+                                logger.info(f"Target locked. Destroying specific report window: {w_title}")
+                                
+                                try:
+                                    leftover_win.set_focus()
+                                    time.sleep(0.2)
+                                    leftover_win.close() # Native Win32 WM_CLOSE
+                                    time.sleep(0.5)
+                                except Exception:
+                                    pass
+                                
+                                # Strategy 2: Multi-Keystroke Barrage if it resists
+                                if leftover_win.exists():
+                                    try:
+                                        send_keys("%{F4}") # Alt+F4
+                                        time.sleep(0.3)
+                                        send_keys("%{c}")  # Alt+C
+                                        time.sleep(0.3)
+                                        send_keys("{ESC}") # Esc
+                                        time.sleep(0.5)
+                                    except Exception:
+                                        pass
+                except Exception as cleanup_err:
+                    logger.debug(f"Failed to clear leftover report windows: {cleanup_err}")
+                # ====================================================
+
                 if recorder.is_active():
                     recorder.stop()
 
-                if current_batch_name and not import_failed:
+                # Dispatch Per-Batch Email
+                if current_batch_name:
                     try:
                         day_folder = datetime.now().strftime("%Y-%m-%d")
                         screenshot_folder = os.path.join(BASE_OUTPUT_DIR, day_folder, current_batch_name)
                         os.makedirs(screenshot_folder, exist_ok=True)
-                        
                         target_path = os.path.join(screenshot_folder, f"screenshot_{datetime.now().strftime('%H-%M-%S')}.png")
                         actual_saved_path = capture_screenshot(target_path) or target_path
 
+                        # FIX: Removed overall_process_failed so per-file reporting is accurate
                         table_rows = [
-                            ("Process Status", "SUCCESSFUL"),
+                            ("Process Status", "FAILED - DATA ERROR" if import_failed else "SUCCESSFUL"),
                             ("Process", process_name),
                             ("Date", current_json_date),
                             ("Client Value", current_client_value),
                             ("Execution Time", current_exec_time),
                         ]
-                        
+                        if import_failed:
+                            table_rows.append(("Error Details", failure_reason or "Tampered file rejected"))
+
                         send_batch_report_email(
                             smtp_config=smtp_config,
                             mail_config=mail_config,
                             table_rows=table_rows,
                             screenshot_path=actual_saved_path,
-                            default_subject=f"Import Batch Report - {process_name}",
+                            default_subject=f"Import Batch Report - {process_name} {'[FAILED]' if import_failed else ''}".strip(),
                         )
                     except Exception as e:
-                        logger.error(f"Failed to capture screenshot / send batch report email: {e}", exc_info=True)
+                        logger.error(f"Failed to send batch report email: {e}", exc_info=True)
 
-
+                    import_failed = False
+                    current_batch_name = None
             # ============================================================
             # 8B. DYNAMIC EXPLICIT REPORT / EMAIL DISPATCH HANDLER
             # ============================================================
@@ -865,7 +951,64 @@ def handle_administration(main_window, process_config, global_config=None, proce
                 if recorder.is_active():
                     recorder.stop()
 
-                if current_batch_name and not import_failed:
+                # MUST BE WIN32 TO READ VB6 DIALOG TEXT
+                desktop = Desktop(backend="win32")
+
+                # Scan for lingering error dialogs using Win32
+                for win in desktop.windows():
+                    try:
+                        w_title = win.window_text()
+                        w_cls = win.class_name()
+                        if re.search(r"(?i).*(Cross|Information|Message|Confirmation|Notice|Alert|Error|Warning|Fatal|#32770).*", w_title) or w_cls in ["#32770", "ThunderRT6FormDC"]:
+                            if win.is_visible() and win.handle != main_window.handle:
+                                body_texts = [w_title]
+                                for ctrl in win.descendants():
+                                    try:
+                                        t = ctrl.window_text().strip()
+                                        if t:
+                                            body_texts.append(t)
+                                    except Exception:
+                                        pass
+                                full_popup_text = " ".join(body_texts).lower()
+
+                                if any(word in full_popup_text for word in ["error", "fatal", "warning", "fail", "invalid", "not found", "unsuccess", "mismatch"]):
+                                    logger.warning(f"Tampered file error caught during send_report: '{full_popup_text}'")
+                                    import_failed = True
+                                    overall_process_failed = True
+                                    failure_reason = f"Application Data Error: {full_popup_text.strip()}"
+                                    
+                                   # WIN32 TARGETED CLOSE LINGERING WINDOW
+                                    logger.info("Attempting to forcefully close lingering white report window in send_report...")
+                                    w_title = win.window_text()
+                                    
+                                    # Strictly only kill it if it is a report window
+                                    if "report" in w_title.lower() and "estro" not in w_title.lower().strip()[:5]:
+                                        try:
+                                            win.set_focus()
+                                            time.sleep(0.2)
+                                            win.close() 
+                                            time.sleep(0.5)
+                                        except Exception:
+                                            pass
+
+                                        if win.exists():
+                                            try:
+                                                send_keys("%{F4}")
+                                                time.sleep(0.3)
+                                                send_keys("%{c}")
+                                                time.sleep(0.3)
+                                                send_keys("{ESC}")
+                                                time.sleep(0.5)
+                                            except Exception:
+                                                pass
+                                        
+                                    time.sleep(1.0)
+                                    break
+                    except Exception:
+                        continue
+
+                # Dispatch email with accurate failure/success table rows
+                if current_batch_name:
                     try:
                         day_folder = datetime.now().strftime("%Y-%m-%d")
                         screenshot_folder = os.path.join(BASE_OUTPUT_DIR, day_folder, current_batch_name)
@@ -874,26 +1017,30 @@ def handle_administration(main_window, process_config, global_config=None, proce
                         target_path = os.path.join(screenshot_folder, f"screenshot_{datetime.now().strftime('%H-%M-%S')}.png")
                         actual_saved_path = capture_screenshot(target_path) or target_path
 
+                        # FIX: Removed overall_process_failed so per-file reporting is accurate
                         table_rows = [
-                            ("Process Status", "SUCCESSFUL"),
+                            ("Process Status", "FAILED - DATA ERROR" if import_failed else "SUCCESSFUL"),
                             ("Process", process_name),
                             ("Date", current_json_date),
                             ("Client Value", current_client_value),
                             ("Execution Time", current_exec_time),
                         ]
+                        if import_failed:
+                            table_rows.append(("Error Details", failure_reason or "Tampered file rejected"))
                         
                         send_batch_report_email(
                             smtp_config=smtp_config,
                             mail_config=mail_config,
                             table_rows=table_rows,
                             screenshot_path=actual_saved_path,
-                            default_subject=f"Import Batch Report - {process_name}",
+                            default_subject=f"Import Batch Report - {process_name} {'[FAILED]' if import_failed else ''}".strip(),
                         )
                         logger.info(f"Successfully transmitted report email for: {current_batch_name}")
-                        current_batch_name = None
                     except Exception as e:
-                        logger.error(f"Failed to capture screenshot / send batch report email: {e}", exc_info=True)            
+                        logger.error(f"Failed to capture screenshot / send batch report email: {e}", exc_info=True)
 
+                    current_batch_name = None
+                    import_failed = False     
             # ============================================================
             # 9. DYNAMIC CONTAINER CLOSE ACTION
             # ============================================================
@@ -940,3 +1087,13 @@ def handle_administration(main_window, process_config, global_config=None, proce
     finally:
         if recorder.is_active():
             recorder.stop()
+
+    # Latch: True if ANY file failed during the run
+    final_verdict = bool(overall_process_failed or import_failed)
+    
+    if final_verdict:
+        logger.error(f"🛑 Run completed with errors (final_verdict=FAILED). Reason: {failure_reason or 'Tampered data detected'}")
+    else:
+        logger.info("✅ Run completed without any recorded failures.")
+
+    return (final_verdict, failure_reason or "Application Data Error")         
