@@ -55,6 +55,14 @@ logger = setup_logger()
 # Main output directory anchored dynamically to the real activity directory
 BASE_OUTPUT_DIR = os.path.join(ACTIVITY_DIR, "Screenshots")
 
+def _log_forensic_window_state(context):
+    """Logs all top-level window titles so client-side failures are diagnosable from the log alone."""
+    try:
+        titles = [w.window_text() for w in Desktop(backend="uia").windows()]
+        logger.error(f"[FORENSICS:{context}] Top-level windows on screen: {titles}")
+    except Exception as forensics_err:
+        logger.debug(f"Forensic window enumeration failed: {forensics_err}")
+
 def resolve_password_value(val):
     """Decodes Base64 if valid; returns plain text as-is if not."""
     if not val or not isinstance(val, str):
@@ -129,6 +137,14 @@ def handle_administration(main_window, process_config, global_config=None, proce
     # Helper to resolve SMTP settings cleanly across configurations
     smtp_config = (global_config or {}).get("email_settings") or (global_config or {}).get("smtp_config") or {}
 
+    # Resolve the app PID once while the window is responsive. Re-resolving the main
+    # window spec fails on VB6 apps whenever the UI thread is blocked (import running)
+    # because the window stops answering UIA property requests.
+    try:
+        cached_app_pid = main_window.process_id()
+    except Exception:
+        cached_app_pid = None
+
     menu_steps = [s for s in steps if s.get('control_type') == "MenuItem" and s.get('action') == "click"]
     other_steps = [s for s in steps if s.get('control_type') != "MenuItem" or s.get('action') != "click"]
 
@@ -164,10 +180,23 @@ def handle_administration(main_window, process_config, global_config=None, proce
                     
                     if auto_id:
                         menu_item = parent_win.child_window(auto_id=str(auto_id), control_type="MenuItem")
+                        menu_item.click_input()
                     else:
-                        menu_item = parent_win.child_window(title_re=f"(?i)^{re.escape(item_title)}$", control_type="MenuItem")
-                        
-                    menu_item.click_input()
+                        # Resolve ALL matching items and pick the JSON occurrence index so
+                        # duplicate menu entries (e.g. two 'Utilities' items on UAT builds)
+                        # no longer abort the whole traversal.
+                        matches = parent_win.descendants(title_re=f"(?i)^{re.escape(item_title)}$", control_type="MenuItem")
+                        if not matches:
+                            raise ElementNotFoundError(f"No menu item matching '{item_title}' was found")
+                        try:
+                            occ_idx = int(step.get('class_occurrence_index', 0) or 0)
+                        except (TypeError, ValueError):
+                            occ_idx = 0
+                        if occ_idx < 0 or occ_idx >= len(matches):
+                            occ_idx = 0
+                        if len(matches) > 1:
+                            logger.info(f"Menu item '{item_title}' matched {len(matches)} elements; using occurrence index {occ_idx}.")
+                        matches[occ_idx].click_input()
                     time.sleep(0.5)
                     # Next sub-menu context attaches to the desktop popup layer if available
                     parent_win = desktop.window(title=item_title) if desktop.window(title=item_title).exists() else parent_win
@@ -176,6 +205,13 @@ def handle_administration(main_window, process_config, global_config=None, proce
                 time.sleep(2.5)
             except Exception as uia_err:
                 logger.warning(f"Dynamic UIA menu selection failed: {uia_err}. Transmitting fallback shortcut key sequence...")
+                # Re-focus the app first so the accelerator keystroke is not lost to
+                # whatever window currently holds foreground focus.
+                try:
+                    main_window.set_focus()
+                    time.sleep(0.3)
+                except Exception:
+                    pass
                 send_keys("^i")
                 time.sleep(2.5)
 
@@ -285,6 +321,7 @@ def handle_administration(main_window, process_config, global_config=None, proce
                     time.sleep(1.0)
                 except Exception as e:
                     logger.error(f"Failed to dynamically process tab change: {e}", exc_info=True)
+                    _log_forensic_window_state("switch_tab")
                     raise RuntimeError(f"Failed to dynamically process tab change: {e}")
 
             # ============================================================
@@ -778,8 +815,28 @@ def handle_administration(main_window, process_config, global_config=None, proce
                     logger.info("Data table successfully loaded and populated with imported values.")
                 except Exception as e:
                     logger.error(f"Failed while waiting for processing table to display records: {e}", exc_info=True)
-                    overall_process_failed = True
-                    raise RuntimeError(f"Failed while waiting for processing table to display records: {e}")
+                    _log_forensic_window_state("wait_for_table")
+                    # A result dialog can legitimately sit in front of the grid (e.g. 'File
+                    # Imported (Success)'); defer to the configured click_ok step instead
+                    # of aborting the whole run.
+                    blocker_active = False
+                    try:
+                        local_desktop = Desktop(backend="uia")
+                        blocker = local_desktop.window(
+                            title_re=r"(?i).*(information|imported|confirmation|notice|message|error|warning|fatal).*",
+                            control_type="Window",
+                            top_level_only=True,
+                            process=cached_app_pid
+                        )
+                        if blocker.exists(timeout=1):
+                            logger.warning(f"Active result dialog '{blocker.window_text()}' detected; skipping grid verification.")
+                            blocker_active = True
+                    except Exception:
+                        pass
+                    if not blocker_active:
+                        overall_process_failed = True
+                        raise RuntimeError(f"Failed while waiting for processing table to display records: {e}")
+
             # ============================================================
             # 8. DYNAMIC CONFIRMATION / MULTI-DIALOG OK CLICK HANDLER
             # ============================================================
