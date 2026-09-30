@@ -962,11 +962,16 @@ def handle_administration(main_window, process_config, global_config=None, proce
                         if re.search(r"(?i).*(Cross|Information|Message|Confirmation|Notice|Alert|Error|Warning|Fatal|#32770).*", w_title) or w_cls in ["#32770", "ThunderRT6FormDC"]:
                             if win.is_visible() and win.handle != main_window.handle:
                                 body_texts = [w_title]
+                                clean_report_text = ""
+
                                 for ctrl in win.descendants():
                                     try:
                                         t = ctrl.window_text().strip()
                                         if t:
                                             body_texts.append(t)
+                                        # Target the dedicated report viewer control directly
+                                        if ctrl.class_name() == "RichTextWndClass":
+                                            clean_report_text = t
                                     except Exception:
                                         pass
                                 full_popup_text = " ".join(body_texts).lower()
@@ -975,8 +980,12 @@ def handle_administration(main_window, process_config, global_config=None, proce
                                     logger.warning(f"Tampered file error caught during send_report: '{full_popup_text}'")
                                     import_failed = True
                                     overall_process_failed = True
-                                    failure_reason = f"Application Data Error: {full_popup_text.strip()}"
                                     
+                                    # Use clean RichTextWndClass text if available without the prefix
+                                    if clean_report_text:
+                                        failure_reason = clean_report_text.replace('\n', ' ').replace('\r', '').strip()
+                                    else:
+                                        failure_reason = win.window_text().strip()                                    
                                    # WIN32 TARGETED CLOSE LINGERING WINDOW
                                     logger.info("Attempting to forcefully close lingering white report window in send_report...")
                                     w_title = win.window_text()
