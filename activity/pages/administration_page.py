@@ -55,11 +55,146 @@ logger = setup_logger()
 # Main output directory anchored dynamically to the real activity directory
 BASE_OUTPUT_DIR = os.path.join(ACTIVITY_DIR, "Screenshots")
 
-def _log_forensic_window_state(context):
-    """Logs all top-level window titles so client-side failures are diagnosable from the log alone."""
+def _is_process_alive(pid):
+    """True when the OS still reports a running process for pid (stdlib only, safe on frozen UIA threads)."""
+    if not pid:
+        return False
     try:
-        titles = [w.window_text() for w in Desktop(backend="uia").windows()]
-        logger.error(f"[FORENSICS:{context}] Top-level windows on screen: {titles}")
+        import ctypes
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        STILL_ACTIVE = 259
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
+        if not handle:
+            return False
+        try:
+            exit_code = ctypes.c_ulong()
+            if kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+                return exit_code.value == STILL_ACTIVE
+            return False
+        finally:
+            kernel32.CloseHandle(handle)
+    except Exception:
+        return False
+
+def _get_foreground_window_info():
+    """Best-effort foreground window title + PID via stdlib ctypes (used by action tracing)."""
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+        hwnd = user32.GetForegroundWindow()
+        if not hwnd:
+            return "<none>"
+        buf = ctypes.create_unicode_buffer(256)
+        user32.GetWindowTextW(hwnd, buf, 256)
+        pid = ctypes.c_ulong()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        return f"'{buf.value}' (pid={pid.value})"
+    except Exception:
+        return "<unknown>"
+
+def _send_keys_traced(location, keys):
+    """Sends keystrokes AND records what was sent plus the foreground window, so any
+    keypress that dismisses a dialog (and could close the app) is traceable in the logs."""
+    logger.info(f"[KEY-TRACE] {location}: sending {keys!r} | foreground: {_get_foreground_window_info()}")
+    send_keys(keys)
+
+_EXIT_DIALOG_HINTS = ("exit", "close", "quit", "terminate")
+
+def _inspect_dialog(dialog):
+    """Returns (title, message_texts, button_titles) best-effort, for tracing dialog decisions."""
+    title = ""
+    texts, buttons = [], []
+    try:
+        title = str(dialog.window_text())
+    except Exception:
+        pass
+    try:
+        texts = [str(t.window_text()) for t in dialog.descendants(control_type="Text")][:5]
+    except Exception:
+        pass
+    try:
+        buttons = [str(b.window_text()) for b in dialog.descendants(control_type="Button")][:8]
+    except Exception:
+        pass
+    return title, texts, buttons
+
+def _looks_like_exit_dialog(title, texts):
+    joined = " ".join([str(title)] + [str(t) for t in (texts or [])]).lower()
+    return any(h in joined for h in _EXIT_DIALOG_HINTS)
+
+def _get_child_processes(parent_pid):
+    """{pid: exe_name} of LIVE processes whose parent is parent_pid (stdlib ToolHelp32).
+    Used to detect helper exes the app spawns to do the real import work (e.g. Cross
+    launches CSVTransformer.exe with a visible console for ISIN master files)."""
+    if not parent_pid:
+        return {}
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        TH32CS_SNAPPROCESS = 0x00000002
+        k32 = ctypes.windll.kernel32
+        k32.CreateToolhelp32Snapshot.restype = ctypes.c_void_p
+        k32.Process32FirstW.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        k32.Process32NextW.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+
+        class PE32W(ctypes.Structure):
+            _fields_ = [
+                ("dwSize", wintypes.DWORD),
+                ("cntUsage", wintypes.DWORD),
+                ("th32ProcessID", wintypes.DWORD),
+                ("th32DefaultHeapID", ctypes.c_size_t),
+                ("th32ModuleID", wintypes.DWORD),
+                ("cntThreads", wintypes.DWORD),
+                ("th32ParentProcessID", wintypes.DWORD),
+                ("pcPriClassBase", wintypes.LONG),
+                ("dwFlags", wintypes.DWORD),
+                ("szExeFile", ctypes.c_wchar * 260),
+            ]
+
+        snap = k32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+        if not snap or snap == ctypes.c_void_p(-1).value:
+            return {}
+        children = {}
+        try:
+            entry = PE32W()
+            entry.dwSize = ctypes.sizeof(PE32W)
+            have = k32.Process32FirstW(snap, ctypes.byref(entry))
+            while have:
+                if entry.th32ParentProcessID == int(parent_pid) and entry.th32ProcessID != int(parent_pid):
+                    children[entry.th32ProcessID] = entry.szExeFile
+                have = k32.Process32NextW(snap, ctypes.byref(entry))
+        finally:
+            k32.CloseHandle(ctypes.c_void_p(snap))
+        return children
+    except Exception:
+        return {}
+
+def _get_foreground_pid():
+    """PID of the current foreground window via stdlib ctypes (None when unknown)."""
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+        hwnd = user32.GetForegroundWindow()
+        if not hwnd:
+            return None
+        pid = ctypes.c_ulong()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        return pid.value or None
+    except Exception:
+        return None
+
+def _log_forensic_window_state(context, target_pid=None):
+    """Logs all top-level window titles (plus PID liveness when given) so client-side failures are diagnosable from the log alone."""
+    try:
+        desktop = Desktop(backend="uia")
+        titles = [w.window_text() for w in desktop.windows()]
+        pid_detail = ""
+        if target_pid:
+            pid_titles = [w.window_text() for w in desktop.windows(process=target_pid)]
+            pid_detail = f" | process {target_pid} alive={_is_process_alive(target_pid)}, windows={pid_titles}"
+        logger.error(f"[FORENSICS:{context}] Top-level windows on screen: {titles}{pid_detail}")
     except Exception as forensics_err:
         logger.debug(f"Forensic window enumeration failed: {forensics_err}")
 
@@ -131,6 +266,7 @@ def handle_administration(main_window, process_config, global_config=None, proce
     skip_until_next_batch = False
     import_failed = False
     failure_reason = ""
+    skipped_step_count = 0
 
     # Helper to resolve SMTP settings cleanly across configurations
     smtp_config = (global_config or {}).get("email_settings") or (global_config or {}).get("smtp_config") or {}
@@ -142,6 +278,14 @@ def handle_administration(main_window, process_config, global_config=None, proce
         cached_app_pid = main_window.process_id()
     except Exception:
         cached_app_pid = None
+
+    # Main frame title, captured while the app is responsive. Used to distinguish
+    # the main window from result dialogs that carry the SAME app-name title
+    # (e.g. a popup titled 'Cross' in front of a window titled 'Cross - DP ...').
+    try:
+        main_frame_title = str(main_window.window_text()).strip()
+    except Exception:
+        main_frame_title = ""
 
     menu_steps = [s for s in steps if s.get('control_type') == "MenuItem" and s.get('action') == "click"]
     other_steps = [s for s in steps if s.get('control_type') != "MenuItem" or s.get('action') != "click"]
@@ -176,25 +320,41 @@ def handle_administration(main_window, process_config, global_config=None, proce
                     
                     logger.info(f"Dynamically targeting menu item: '{item_title}' (AutoID: {auto_id})")
                     
+                    # Some builds expose DUPLICATE menu entries (two 'Utilities' items, two
+                    # items sharing AutoID 226), so both paths enumerate the MenuItems and
+                    # pick by JSON occurrence index — a direct child_window() click raises
+                    # an ambiguous-match error when 2+ elements share the criteria.
+                    all_menu_items = parent_win.descendants(control_type="MenuItem")
+
                     if auto_id:
-                        menu_item = parent_win.child_window(auto_id=str(auto_id), control_type="MenuItem")
-                        menu_item.click_input()
+                        matches = []
+                        for el in all_menu_items:
+                            try:
+                                if str(getattr(el.element_info, 'automation_id', '') or '') == str(auto_id):
+                                    matches.append(el)
+                            except Exception:
+                                continue
+                        if not matches:
+                            raise ElementNotFoundError(f"No menu item with AutoID '{auto_id}' was found")
                     else:
-                        # Resolve ALL matching items and pick the JSON occurrence index so
-                        # duplicate menu entries (e.g. two 'Utilities' items on UAT builds)
-                        # no longer abort the whole traversal.
-                        matches = parent_win.descendants(title_re=f"(?i)^{re.escape(item_title)}$", control_type="MenuItem")
+                        # title_re is not supported by every bundled pywinauto version
+                        # (IUIA.build_condition() raises 'unexpected keyword argument'),
+                        # so match titles in Python instead.
+                        item_pattern = re.compile(rf"(?i)^{re.escape(str(item_title).strip())}$")
+                        matches = [el for el in all_menu_items
+                                   if item_pattern.match(str(el.window_text() or '').strip())]
                         if not matches:
                             raise ElementNotFoundError(f"No menu item matching '{item_title}' was found")
-                        try:
-                            occ_idx = int(step.get('class_occurrence_index', 0) or 0)
-                        except (TypeError, ValueError):
-                            occ_idx = 0
-                        if occ_idx < 0 or occ_idx >= len(matches):
-                            occ_idx = 0
-                        if len(matches) > 1:
-                            logger.info(f"Menu item '{item_title}' matched {len(matches)} elements; using occurrence index {occ_idx}.")
-                        matches[occ_idx].click_input()
+
+                    try:
+                        occ_idx = int(step.get('class_occurrence_index', 0) or 0)
+                    except (TypeError, ValueError):
+                        occ_idx = 0
+                    if occ_idx < 0 or occ_idx >= len(matches):
+                        occ_idx = 0
+                    if len(matches) > 1:
+                        logger.info(f"Menu item '{item_title}' (AutoID: {auto_id}) matched {len(matches)} elements; using occurrence index {occ_idx}.")
+                    matches[occ_idx].click_input()
                     time.sleep(0.5)
                     # Next sub-menu context attaches to the desktop popup layer if available
                     parent_win = desktop.window(title=item_title) if desktop.window(title=item_title).exists() else parent_win
@@ -210,7 +370,7 @@ def handle_administration(main_window, process_config, global_config=None, proce
                     time.sleep(0.3)
                 except Exception:
                     pass
-                send_keys("^i")
+                _send_keys_traced("menu selection fallback accelerator", "^i")
                 time.sleep(2.5)
 
     recorder = ScreenRecorder()
@@ -248,6 +408,7 @@ def handle_administration(main_window, process_config, global_config=None, proce
                     logger.info(f"Resetting error bypass flag. Found next setup action configuration entry: {action}")
                     skip_until_next_batch = False
                 else:
+                    skipped_step_count += 1
                     logger.info(f"Skipping dependency step due to previous File-Not-Found state: {desc}")
                     continue
 
@@ -426,7 +587,7 @@ def handle_administration(main_window, process_config, global_config=None, proce
                             
                         # --- ADDED: EMAIL LOGIC FOR MISSING FOLDER ---
                         day_folder = datetime.now().strftime("%Y-%m-%d")
-                        screenshot_folder = os.path.join(BASE_OUTPUT_DIR, day_folder, current_batch_name)
+                        screenshot_folder = os.path.join(BASE_OUTPUT_DIR, day_folder, current_batch_name or process_name)
                         os.makedirs(screenshot_folder, exist_ok=True)
                         screenshot_path = os.path.join(screenshot_folder, f"FOLDER_NOT_FOUND_{datetime.now().strftime('%H-%M-%S')}.png")
                         actual_saved_path = capture_screenshot(screenshot_path) or screenshot_path
@@ -468,7 +629,7 @@ def handle_administration(main_window, process_config, global_config=None, proce
                             
                         # --- ADDED: EMAIL LOGIC FOR MISSING FILE ---
                         day_folder = datetime.now().strftime("%Y-%m-%d")
-                        screenshot_folder = os.path.join(BASE_OUTPUT_DIR, day_folder, current_batch_name)
+                        screenshot_folder = os.path.join(BASE_OUTPUT_DIR, day_folder, current_batch_name or process_name)
                         os.makedirs(screenshot_folder, exist_ok=True)
                         screenshot_path = os.path.join(screenshot_folder, f"FILE_NOT_FOUND_{datetime.now().strftime('%H-%M-%S')}.png")
                         actual_saved_path = capture_screenshot(screenshot_path) or screenshot_path
@@ -624,6 +785,9 @@ def handle_administration(main_window, process_config, global_config=None, proce
             elif action == "click_import":
                     logger.info(f"Executing Process Confirmation Target Step: {desc}")
                     try:
+                        # Each import cycle starts from a clean failure state
+                        import_failed = False
+                        failure_reason = ""
                         import_window = _get_target_window(step)
                         
                         if auto_id:
@@ -638,62 +802,198 @@ def handle_administration(main_window, process_config, global_config=None, proce
                         # 1. Grab PID before clicking so the engine remembers it before the freeze
                         target_pid = cached_app_pid
 
+                        # Snapshot the app's top-level windows while it is still responsive so
+                        # completion popups are detected as NEW arrivals instead of title guessing.
+                        baseline_titles = set()
+                        baseline_window_count = None
+                        if target_pid:
+                            try:
+                                baseline_wins = Desktop(backend="uia").windows(process=target_pid)
+                                baseline_titles = {str(w.window_text()).strip() for w in baseline_wins}
+                                baseline_window_count = len(baseline_wins)
+                            except Exception:
+                                pass
+
+                        # Snapshot already-running helper processes too, so only helpers
+                        # spawned BY THIS IMPORT (e.g. CSVTransformer.exe) gate the wait.
+                        baseline_child_pids = set(_get_child_processes(target_pid).keys()) if target_pid else set()
+
                         import_action_btn.click()
                         logger.info("Successfully requested document structural engine processing via final file Import control.")
-                        
-                        # ========================================================
-                        # 🚀 NEW: THE LOOKAHEAD RADAR (Cross vs Estro Router)
-                        # ========================================================
-                        next_action = ""
-                        # Peek at the very next step in the JSON array
-                        if index + 1 < len(other_steps):
-                            next_action = other_steps[index + 1].get('action')
 
-                        if next_action == "wait_for_table":
-                            logger.info("Engine Auto-Detect: Grid-based UI (Cross). Applying 3-second static buffer...")
-                            time.sleep(3.0)
-                        else:
-                            logger.info("Engine Auto-Detect: Locked-thread UI (Estro / Compliance Sutra). Initiating dynamic OS polling...")
-                            max_wait_seconds = 10800 # 3-hour safety net
-                            start_time = time.time()
-                            time.sleep(3.0) # Buffer to allow application to freeze
-                            
-                            desktop_spy = Desktop(backend="uia")
+                        # ========================================================
+                        # 🚀 POST-IMPORT COMPLETION RADAR (freeze-tolerant)
+                        # ========================================================
+                        # VB6 apps (Cross / Estro / Compliance Sutra) block their UI thread
+                        # while an import runs. While frozen, re-resolving the main window
+                        # spec raises ElementNotFoundError (the classic 'ThunderRT6MDIForm'
+                        # abort), so every probe below is guarded and can never crash the
+                        # run by itself. The loop exits on: result popup (new PID window or
+                        # keyword title), silent-success unfreeze, or process death.
+                        popup_keywords = ("Information", "Message", "Success", "Sucess", "Imported",
+                                          "Confirmation", "Notice", "Warning", "Error", "Fatal")
 
-                            while (time.time() - start_time) < max_wait_seconds:
+                        max_wait_seconds = 10800  # 3-hour safety net
+                        death_confirmations = 0
+                        start_time = time.time()
+                        next_heartbeat = time.time() + 30
+                        next_helper_log = time.time() + 10
+                        time.sleep(3.0)  # Buffer to allow the application to settle into processing
+                        desktop_spy = Desktop(backend="uia")
+
+                        while (time.time() - start_time) < max_wait_seconds:
+                            # 1) Detect application death (crash / session drop), debounced
+                            #    so a transient window recreation is never misread as a crash.
+                            if target_pid and not _is_process_alive(target_pid):
+                                death_confirmations += 1
+                                if death_confirmations >= 3:
+                                    # Config-agnostic guard: when click_import is the FINAL step of
+                                    # the client's JSON, an app that exits on success must not be
+                                    # reported as a crash. Anything after this step needs the app.
+                                    if index + 1 >= len(other_steps):
+                                        logger.warning(
+                                            f"Target application (PID {target_pid}) exited after the final "
+                                            f"import step; treating as completed."
+                                        )
+                                        break
+                                    logger.critical(
+                                        f"Target application process (PID {target_pid}) terminated while "
+                                        f"processing the import. Capturing evidence before aborting..."
+                                    )
+                                    _log_forensic_window_state("click_import", target_pid)
+
+                                    crash_screenshot_path = None
+                                    try:
+                                        day_folder = datetime.now().strftime("%Y-%m-%d")
+                                        screenshot_folder = os.path.join(BASE_OUTPUT_DIR, day_folder, current_batch_name or process_name)
+                                        os.makedirs(screenshot_folder, exist_ok=True)
+                                        crash_screenshot_path = os.path.join(
+                                            screenshot_folder,
+                                            f"APP_CRASH_CAPTURE_{datetime.now().strftime('%H-%M-%S')}.png"
+                                        )
+                                        capture_screenshot(crash_screenshot_path)
+                                    except Exception as shot_err:
+                                        logger.error(f"Crash screenshot capture failed: {shot_err}")
+
+                                    try:
+                                        send_batch_report_email(
+                                            smtp_config=smtp_config,
+                                            mail_config=mail_config,
+                                            table_rows=[
+                                                ("Process Status", "FAILED - APPLICATION TERMINATED"),
+                                                ("Process Name", process_name),
+                                                ("Error Captured", f"Application process (PID {target_pid}) exited during import processing"),
+                                                ("Client Context", current_client_value),
+                                                ("System Execution Time", current_exec_time),
+                                            ],
+                                            screenshot_path=crash_screenshot_path,
+                                            default_subject=f"CRITICAL ERROR: Application Closed During Import - {process_name}",
+                                        )
+                                    except Exception as email_err:
+                                        logger.error(f"Failed to transmit crash alert email: {email_err}")
+
+                                    raise RuntimeError(
+                                        f"Target application process (PID {target_pid}) terminated during import "
+                                        f"processing (application crash or session drop). See the FORENSICS log "
+                                        f"entry and crash screenshot for details."
+                                    )
+                                time.sleep(0.5)
+                                continue
+                            death_confirmations = 0
+
+                            # 2) HELPER-PROCESS WAIT. The app can delegate the real import work
+                            #    to a spawned helper exe (Cross launches CSVTransformer.exe
+                            #    with a visible console for big ISIN master files). The main
+                            #    window stays ENABLED while the helper runs, so nothing else
+                            #    may break the radar until every helper of THIS import exits.
+                            if target_pid:
                                 try:
-                                    # Break if ANY popup appears (Success OR Error)
-                                    active_windows = desktop_spy.windows(process=target_pid)
-                                    popup_detected = False
-                                    for win in active_windows:
-                                        win_text = str(win.window_text()).strip()
-                                        # (Kept your custom "Sucess" spelling catch here!)
-                                        if any(keyword in win_text for keyword in ["Information", "Message", "Success","Sucess","Estro", "Error", "Fatal"]):
-                                            popup_detected = True
-                                            break
-                                    if popup_detected:
+                                    active_helpers = {cp: name for cp, name in _get_child_processes(target_pid).items()
+                                                      if cp not in baseline_child_pids}
+                                except Exception:
+                                    active_helpers = {}
+                                if active_helpers:
+                                    if time.time() >= next_helper_log:
+                                        next_helper_log = time.time() + 15
+                                        logger.info(
+                                            f"[RADAR] Import helper process still running: "
+                                            f"{sorted(active_helpers.values())} — waiting for it to finish."
+                                        )
+                                    time.sleep(1.0)
+                                    continue
+
+                            try:
+                                # 2) Break as soon as a result popup appears: either a NEW titled
+                                #    window under the app PID, a NEW window COUNT (untitled
+                                #    dialogs), or a known keyword title.
+                                if target_pid:
+                                    pid_titles = [str(w.window_text()).strip()
+                                                  for w in desktop_spy.windows(process=target_pid)]
+                                    popups = []
+                                    if baseline_titles:
+                                        popups = [t for t in pid_titles if t and t not in baseline_titles]
+                                    if not popups and baseline_window_count is not None and len(pid_titles) > baseline_window_count:
+                                        popups = ["<new app window appeared>"]
+                                    if not popups:
+                                        popups = [t for t in pid_titles
+                                                  if any(keyword in t for keyword in popup_keywords)]
+                                    if popups:
+                                        logger.info(f"Import completion dialog detected: {popups[0]}")
                                         break
 
-                                    # Break if main window naturally unfreezes (silent success)
-                                    if import_window.is_enabled():
-                                        break
+                                # 3) Break as soon as the app window RESOLVES again after the
+                                #    freeze. Enabled = silent success (grid UI). Disabled = a
+                                #    modal result dialog (e.g. 'File Imported') owns the window —
+                                #    the import is finished either way, and the following steps
+                                #    (grid verification / click_ok) handle the dialog.
+                                probe_state = None  # None=still unresolvable(frozen), True/False=resolved
+                                for probe_window in (import_window, main_window):
+                                    if probe_window.exists(timeout=1, retry_interval=0.2):
+                                        try:
+                                            probe_state = probe_window.is_enabled()
+                                        except Exception:
+                                            probe_state = None
+                                        if probe_state is not None:
+                                            break
+                                if probe_state is True:
+                                    logger.info("Main application window is responsive again (silent success path).")
+                                    break
+                                if probe_state is False:
+                                    logger.info("App window resolves but is disabled — a modal result dialog is up; proceeding to dialog handling.")
+                                    break
+                            except Exception:
+                                pass  # Swallow pywinauto COM/element errors while frozen
+
+                            if time.time() >= next_heartbeat:
+                                next_heartbeat = time.time() + 30
+                                try:
+                                    hb_titles = [str(w.window_text()) for w in desktop_spy.windows(process=target_pid)] if target_pid else []
                                 except Exception:
-                                    pass # Swallow Pywinauto COM errors while frozen
-                                
-                                time.sleep(0.5) 
-                        # ========================================================
+                                    hb_titles = []
+                                logger.info(
+                                    f"[RADAR] Still waiting after {int(time.time() - start_time)}s | "
+                                    f"app windows: {hb_titles}"
+                                )
+
+                            time.sleep(0.5)
+                        else:
+                            logger.warning("Post-import completion radar reached its safety timeout; proceeding to next step.")
                         
                         desktop = Desktop(backend="uia")
                         
                         try:
-                            fatal_dialog = desktop.window(title_re="(?i).*(fatal|error).*", control_type="Window", top_level_only=True)
+                            # Scoped to the app PID so unrelated desktop windows titled
+                            # 'error' (browsers, chat tools) can't fake an import failure.
+                            fatal_dialog = desktop.window(title_re="(?i).*(fatal|error).*", control_type="Window", top_level_only=True, process=cached_app_pid)
                             if fatal_dialog.exists(timeout=1.5):
                                 failure_reason = fatal_dialog.window_text()
                                 logger.warning(f"Detected Application Error Layer Context: '{failure_reason}'")
                                 
                                 fatal_dialog.set_focus()
                                 time.sleep(0.2)
-                                send_keys("{ENTER}")
+                                f_title, f_texts, f_buttons = _inspect_dialog(fatal_dialog)
+                                logger.warning(f"[DIALOG-TRACE] Fatal/error dialog being dismissed: '{f_title}' | text: {f_texts} | buttons: {f_buttons}")
+                                _send_keys_traced(f"click_import error-dialog dismissal ('{f_title}')", "{ENTER}")
                                 import_failed = True
                                 time.sleep(2.0)
                         except Exception as dialog_check_err:
@@ -722,7 +1022,7 @@ def handle_administration(main_window, process_config, global_config=None, proce
                                 recorder.stop()
 
                             day_folder = datetime.now().strftime("%Y-%m-%d")
-                            screenshot_folder = os.path.join(BASE_OUTPUT_DIR, day_folder, current_batch_name)
+                            screenshot_folder = os.path.join(BASE_OUTPUT_DIR, day_folder, current_batch_name or process_name)
                             os.makedirs(screenshot_folder, exist_ok=True)
                             screenshot_path = os.path.join(screenshot_folder, f"IMPORT_FAILURE_CAPTURE_{datetime.now().strftime('%H-%M-%S')}.png")
                             capture_screenshot(screenshot_path)
@@ -768,30 +1068,51 @@ def handle_administration(main_window, process_config, global_config=None, proce
                         grid_cls = step.get('class_name', 'MSHFlexGridWndClass')
                         table_grid = import_window.child_window(class_name=grid_cls, control_type=ctrl_type, found_index=0)
 
-                    grid_timeout = step.get('timeout', 60)
-                    logger.info("Waiting for data grid table initialization...")
-                    table_grid.wait('exists', timeout=grid_timeout)
-                    table_grid.wait('ready', timeout=grid_timeout)
-                    time.sleep(1.5)
-                    logger.info("Data table successfully loaded and populated with imported values.")
+                    grid_timeout = step.get('timeout', 300)
+
+                    # A result dialog (e.g. 'File Imported') can sit in front of the grid with
+                    # the app-name itself as its title. Detect it up front by enumerating the
+                    # app's windows (skipping the main frame) and defer straight to the
+                    # configured click_ok step instead of burning the full grid timeout.
+                    blocker_pre = None
+                    try:
+                        for w in Desktop(backend="uia").windows(process=cached_app_pid, top_level_only=True) if cached_app_pid else []:
+                            t = str(w.window_text()).strip()
+                            if (t and t != main_frame_title
+                                    and re.search(r"(?i).*(cross|information|imported|confirmation|notice|message|error|warning|fatal).*", t)):
+                                blocker_pre = t
+                                break
+                    except Exception:
+                        pass
+
+                    if blocker_pre:
+                        logger.warning(f"Active result dialog '{blocker_pre}' detected before grid wait; skipping grid verification and deferring to the dialog step.")
+                    else:
+                        logger.info(f"Waiting for data grid table initialization (timeout: {grid_timeout}s)...")
+                        table_grid.wait('exists', timeout=grid_timeout)
+                        table_grid.wait('ready', timeout=grid_timeout)
+                        time.sleep(1.5)
+                        logger.info("Data table successfully loaded and populated with imported values.")
                 except Exception as e:
                     logger.error(f"Failed while waiting for processing table to display records: {e}", exc_info=True)
-                    _log_forensic_window_state("wait_for_table")
+                    if not _is_process_alive(cached_app_pid):
+                        logger.critical(
+                            f"Target application process (PID {cached_app_pid}) is no longer running; "
+                            f"it terminated before or during the grid verification wait."
+                        )
+                    _log_forensic_window_state("wait_for_table", cached_app_pid)
                     # A result dialog can legitimately sit in front of the grid (e.g. 'File
                     # Imported (Success)'); defer to the configured click_ok step instead
                     # of aborting the whole run.
                     blocker_active = False
                     try:
-                        local_desktop = Desktop(backend="uia")
-                        blocker = local_desktop.window(
-                            title_re=r"(?i).*(information|imported|confirmation|notice|message|error|warning|fatal).*",
-                            control_type="Window",
-                            top_level_only=True,
-                            process=cached_app_pid
-                        )
-                        if blocker.exists(timeout=1):
-                            logger.warning(f"Active result dialog '{blocker.window_text()}' detected; skipping grid verification.")
-                            blocker_active = True
+                        for w in Desktop(backend="uia").windows(process=cached_app_pid, top_level_only=True) if cached_app_pid else []:
+                            t = str(w.window_text()).strip()
+                            if (t and t != main_frame_title
+                                    and re.search(r"(?i).*(cross|information|imported|confirmation|notice|message|error|warning|fatal).*", t)):
+                                logger.warning(f"Active result dialog '{t}' detected; skipping grid verification.")
+                                blocker_active = True
+                                break
                     except Exception:
                         pass
                     if not blocker_active:
@@ -808,30 +1129,77 @@ def handle_administration(main_window, process_config, global_config=None, proce
                 # Check up to 5 consecutive dialog popups (handles consecutive error/info popups)
                 max_dialog_checks = step.get('max_popup_count', 5)
                 dialogs_cleared = 0
+                exit_dialog_seen = False
 
                 for check_idx in range(1, max_dialog_checks + 1):
                     logger.info(f"Polling for active pop-up dialog window (Attempt {check_idx}/{max_dialog_checks})...")
                     btn_clicked = False
 
-                    # Strategy 1: Search top-level modal popups strictly within target application PID
+                    # Strategy 1: Search top-level modal popups strictly within target application PID.
+                    # Result dialogs often carry the app name itself as their title (e.g. a popup
+                    # titled 'Cross'), so we ENUMERATE the app's top-level windows and skip the
+                    # main frame — a single window() lookup would match the main window first.
                     try:
                         dialog_title_cfg = step.get('dialog_title') or step.get('window_title')
-                        if dialog_title_cfg:
-                            active_dialog = desktop.window(
-                                title_re=f"(?i).*{re.escape(dialog_title_cfg)}.*", 
-                                top_level_only=True, 
+                        dialog_candidates = []
+
+                        if dialog_title_cfg and target_pid:
+                            spec = desktop.window(
+                                title_re=f"(?i).*{re.escape(dialog_title_cfg)}.*",
+                                top_level_only=True,
                                 process=target_pid
                             )
+                            if spec.exists(timeout=2):
+                                dialog_candidates.append(spec)
+                        elif target_pid:
+                            for w in desktop.windows(process=target_pid, top_level_only=True):
+                                w_title = str(w.window_text()).strip()
+                                if w_title and w_title != main_frame_title:
+                                    dialog_candidates.append(w)
                         else:
-                            active_dialog = desktop.window(
-                                title_re=r"(?i).*(Cross|Information|Message|Confirmation|Notice|Alert|Error|Warning|Fatal).*", 
-                                top_level_only=True, 
-                                process=target_pid
+                            spec = desktop.window(
+                                title_re=r"(?i).*(Cross|Information|Message|Confirmation|Notice|Alert|Error|Warning|Fatal).*",
+                                top_level_only=True
+                            )
+                            if spec.exists(timeout=2):
+                                dialog_candidates.append(spec)
+
+                        for active_dialog in dialog_candidates:
+                            try:
+                                active_dialog.set_focus()
+                            except Exception:
+                                pass
+                            time.sleep(0.3)
+
+                            # Trace EVERY popup we act on: title, message text, buttons.
+                            dlg_title, dlg_texts, dlg_buttons = _inspect_dialog(active_dialog)
+                            logger.info(
+                                f"[DIALOG-TRACE] Popup candidate (attempt {check_idx}): '{dlg_title}' | "
+                                f"text: {dlg_texts} | buttons: {dlg_buttons}"
                             )
 
-                        if active_dialog.exists(timeout=2):
-                            active_dialog.set_focus()
-                            time.sleep(0.3)
+                            if _looks_like_exit_dialog(dlg_title, dlg_texts):
+                                # SAFETY GUARD: click_ok is meant for result dialogs (OK /
+                                # confirmation), NEVER for closing the app. If an exit/close
+                                # prompt shows up here we do not answer it — we log it loudly,
+                                # screenshot it, and stop dismissing popups so the real error
+                                # surfaces instead of the app silently dying.
+                                logger.critical(
+                                    f"[EXIT-TRACE] Exit/close dialog appeared unexpectedly at step "
+                                    f"'{desc}': '{dlg_title}' text={dlg_texts} buttons={dlg_buttons}. "
+                                    f"REFUSING to click any button on it — the app will NOT be "
+                                    f"closed by this step."
+                                )
+                                try:
+                                    day_folder = datetime.now().strftime("%Y-%m-%d")
+                                    shot_dir = os.path.join(BASE_OUTPUT_DIR, day_folder, current_batch_name or process_name)
+                                    os.makedirs(shot_dir, exist_ok=True)
+                                    capture_screenshot(os.path.join(
+                                        shot_dir, f"EXIT_DIALOG_{datetime.now().strftime('%H-%M-%S')}.png"))
+                                except Exception:
+                                    pass
+                                exit_dialog_seen = True
+                                break
 
                             # Find target button inside modal
                             if auto_id:
@@ -849,8 +1217,13 @@ def handle_administration(main_window, process_config, global_config=None, proce
                                 dialogs_cleared += 1
                                 btn_clicked = True
                                 time.sleep(1.2)
+                                break
                     except Exception as modal_err:
                         logger.debug(f"Modal popup search iteration {check_idx}: {modal_err}")
+
+                    # An exit/close dialog must never fall through to the generic strategies.
+                    if exit_dialog_seen:
+                        break
 
                     # Strategy 2: Search inside main_window children
                     if not btn_clicked:
@@ -873,10 +1246,29 @@ def handle_administration(main_window, process_config, global_config=None, proce
                     # Strategy 3: Single modal dismissal via ENTER keypress
                     if not btn_clicked:
                         if check_idx == 1:
-                            logger.info("No explicit button caught via UIA. Sending Enter keypress to clear active modal...")
-                            send_keys("{ENTER}")
-                            dialogs_cleared += 1
-                            time.sleep(1.0)
+                            # ENTER presses the DEFAULT button, which is 'Yes' on close/exit
+                            # prompts — never send it blindly into an exit-looking window.
+                            fg_info = _get_foreground_window_info()
+                            if any(h in fg_info.lower() for h in _EXIT_DIALOG_HINTS):
+                                logger.critical(
+                                    f"[EXIT-TRACE] Blind ENTER SUPPRESSED: the foreground window "
+                                    f"looks like an exit/close dialog: {fg_info}. "
+                                    f"Not sending keys; leaving dialog untouched."
+                                )
+                                exit_dialog_seen = True
+                                break
+                            fg_pid = _get_foreground_pid()
+                            if target_pid and fg_pid is not None and fg_pid != target_pid:
+                                logger.warning(
+                                    f"[KEY-TRACE] Blind ENTER suppressed: the foreground window "
+                                    f"belongs to process {fg_pid} (not the target app {target_pid}). "
+                                    f"Not sending keys outside the target application."
+                                )
+                            else:
+                                logger.info("No explicit button caught via UIA. Sending Enter keypress to clear active modal...")
+                                _send_keys_traced(f"click_ok '{desc}' (blind ENTER fallback)", "{ENTER}")
+                                dialogs_cleared += 1
+                                time.sleep(1.0)
                         else:
                             break
 
@@ -888,7 +1280,7 @@ def handle_administration(main_window, process_config, global_config=None, proce
                 if current_batch_name and not import_failed:
                     try:
                         day_folder = datetime.now().strftime("%Y-%m-%d")
-                        screenshot_folder = os.path.join(BASE_OUTPUT_DIR, day_folder, current_batch_name)
+                        screenshot_folder = os.path.join(BASE_OUTPUT_DIR, day_folder, current_batch_name or process_name)
                         os.makedirs(screenshot_folder, exist_ok=True)
                         
                         target_path = os.path.join(screenshot_folder, f"screenshot_{datetime.now().strftime('%H-%M-%S')}.png")
@@ -925,7 +1317,7 @@ def handle_administration(main_window, process_config, global_config=None, proce
                 if current_batch_name and not import_failed:
                     try:
                         day_folder = datetime.now().strftime("%Y-%m-%d")
-                        screenshot_folder = os.path.join(BASE_OUTPUT_DIR, day_folder, current_batch_name)
+                        screenshot_folder = os.path.join(BASE_OUTPUT_DIR, day_folder, current_batch_name or process_name)
                         os.makedirs(screenshot_folder, exist_ok=True)
                         
                         target_path = os.path.join(screenshot_folder, f"screenshot_{datetime.now().strftime('%H-%M-%S')}.png")
@@ -983,16 +1375,41 @@ def handle_administration(main_window, process_config, global_config=None, proce
 
                         close_shortcut = step.get('shortcut', '^{F4}')
                         logger.info(f"Sending internal container close shortcut ({close_shortcut})...")
-                        send_keys(close_shortcut)
+                        _send_keys_traced(f"click_close '{desc}' (import window close)", close_shortcut)
                         logger.info(f"Successfully requested closure of Import frame.")
                         time.sleep(2.0)
                 except Exception as e:
                     logger.warning(f"Close step encountered an issue: {e}. Executing emergency shortcut fallback...")
                     try:
-                        send_keys("^{F4}")
-                        time.sleep(1.5)
+                        # Refocus our app first; never send the window-close shortcut while
+                        # ANOTHER application (browser, console, ...) holds the foreground.
+                        try:
+                            main_window.set_focus()
+                            time.sleep(0.3)
+                        except Exception:
+                            pass
+                        fg_pid = _get_foreground_pid()
+                        if cached_app_pid and fg_pid is not None and fg_pid != cached_app_pid:
+                            logger.warning(
+                                f"[KEY-TRACE] Close shortcut suppressed: the foreground window "
+                                f"belongs to process {fg_pid}, not the target app ({cached_app_pid})."
+                            )
+                        else:
+                            _send_keys_traced(f"click_close '{desc}' (emergency fallback)", "^{F4}")
+                            time.sleep(1.5)
                     except Exception as fallback_err:
                         logger.error(f"Fallback close shortcut failed: {fallback_err}", exc_info=True)
+
+        # End-of-run summary: makes a run where every import was silently skipped
+        # (file/folder missing) unmistakable in the log before auto_close fires.
+        if skipped_step_count:
+            logger.critical(
+                f"[SUMMARY] {skipped_step_count} of {len(other_steps)} step(s) were SKIPPED "
+                f"because of a File/Folder-Not-Found state — those import batches did NOT run. "
+                f"Check D:\\CDSLFILES date folders and files before the next schedule."
+            )
+        else:
+            logger.info(f"[SUMMARY] All {len(other_steps)} non-menu step(s) processed; no steps were skipped.")
 
     finally:
         if recorder.is_active():
