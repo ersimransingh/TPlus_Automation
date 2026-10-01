@@ -2,30 +2,30 @@
   "SCHEDULED_TASKS": [
     {
       "Process_name": "Process_01",
-      "enabled": true,
+      "enabled":true,
       "DESCRIPTION": "Estro (CLIENT_MASTER ,ISIN_MASTER,ISIN_RATE,SOT,SOH)",
-      "EXECUTION_TIME": "14:17",
+      "EXECUTION_TIME": "16:56",
       "reporting_email": "preston75@zohomail.in",
-      "RETRY_COUNT": "5",
+      "RETRY_COUNT": "1",
       "RETRY_TIME": "2"
     },
     {
       "Process_name": "Process_02",
       "enabled": false,
       "DESCRIPTION": "BOD (ISIN_MASTER)",
-      "EXECUTION_TIME": "16:26",
-      "reporting_email": "reporting_person@gmail.com",
-      "RETRY_COUNT": "4",
-      "RETRY_TIME": "4"
+      "EXECUTION_TIME": "14:15",
+      "reporting_email": "preston75@zohomail.in",
+      "RETRY_COUNT": "1",
+      "RETRY_TIME": "2"
     },
     {
       "Process_name": "Process_03",
-      "enabled": false,
+      "enabled":false,
       "DESCRIPTION": "BOD (ISIN_RATE)",
-      "EXECUTION_TIME": "06:10",
-      "reporting_email": "reporting_person@gmail.com",
-      "RETRY_COUNT": "4",
-      "RETRY_TIME": "4"
+      "EXECUTION_TIME": "15:31",
+      "reporting_email": "preston75@zohomail.in",
+      "RETRY_COUNT": "1",
+      "RETRY_TIME": "2"
     },
     {
       "Process_name": "Process_04",
