@@ -1,19 +1,31 @@
-{
+{  
+  
+ "holiday_settings": {
+    "skip_weekends": true,
+    "weekend_days": ["Sunday"],
+    "holidays": [
+      "2026-10-10",
+      "2026-09-30",
+      "2026-09-20",
+      "2026-09-15"
+    ]
+  },
+
   "SCHEDULED_TASKS": [
     {
       "Process_name": "Process_01",
-      "enabled":true,
+      "enabled":false,
       "DESCRIPTION": "Estro (CLIENT_MASTER ,ISIN_MASTER,ISIN_RATE,SOT,SOH)",
-      "EXECUTION_TIME": "16:56",
+      "EXECUTION_TIME": "18:21",
       "reporting_email": "preston75@zohomail.in",
       "RETRY_COUNT": "1",
       "RETRY_TIME": "2"
     },
     {
       "Process_name": "Process_02",
-      "enabled": false,
+      "enabled":true,
       "DESCRIPTION": "BOD (ISIN_MASTER)",
-      "EXECUTION_TIME": "14:15",
+      "EXECUTION_TIME": "18:35",
       "reporting_email": "preston75@zohomail.in",
       "RETRY_COUNT": "1",
       "RETRY_TIME": "2"
@@ -22,7 +34,7 @@
       "Process_name": "Process_03",
       "enabled":false,
       "DESCRIPTION": "BOD (ISIN_RATE)",
-      "EXECUTION_TIME": "15:31",
+      "EXECUTION_TIME": "16:15",
       "reporting_email": "preston75@zohomail.in",
       "RETRY_COUNT": "1",
       "RETRY_TIME": "2"
