@@ -81,6 +81,10 @@ def capture_screenshot(tag_name="Dialog_OK"):
 import re
 from datetime import datetime, date, timedelta
 
+# Matches only relative tokens like 't-4' / 't + 1'. A loose "contains t and -" check
+# misreads formatted dates such as '01-Oct-2026' (the 't' in 'Oct') as offset -2026.
+RELATIVE_DATE_RE = re.compile(r'^t\s*[-+]\s*\d+$')
+
 def get_date_components(date_str):
     """
     Parses date_str into (day, month, year) tuples safely.
@@ -92,7 +96,7 @@ def get_date_components(date_str):
 
     normalized = str(date_str).strip().lower()
 
-    if "t" in normalized and ("-" in normalized or "+" in normalized):
+    if RELATIVE_DATE_RE.match(normalized):
         try:
             match = re.search(r'[-+]\s*\d+', normalized)
             if match:
@@ -130,7 +134,7 @@ def resolve_date_string(date_str):
         target_date = today_dt - timedelta(days=1)  # FIXED
     elif normalized == "tomorrow":
         target_date = today_dt + timedelta(days=1)   # FIXED
-    elif normalized.startswith("t") and ("-" in normalized or "+" in normalized):
+    elif RELATIVE_DATE_RE.match(normalized):
         try:
             offset_match = re.search(r'[-+]\s*\d+', normalized)
             if offset_match:
@@ -169,7 +173,7 @@ def resolve_date_yyyymmdd(date_str):
         target_date = today_dt - timedelta(days=1)
     elif normalized == "tomorrow":
         target_date = today_dt + timedelta(days=1)
-    elif "t" in normalized and ("-" in normalized or "+" in normalized):
+    elif RELATIVE_DATE_RE.match(normalized):
         try:
             match = re.search(r'[-+]\s*\d+', normalized)
             if match:
@@ -553,7 +557,7 @@ def format_date_folder_name(date_token):
             pass
 
     # 2. Handle Relative Date Expressions (e.g., 't-1', 't-4')
-    elif "t" in raw.lower() and ("-" in raw or "+" in raw):
+    elif RELATIVE_DATE_RE.match(raw.lower()):
         try:
             match = re.search(r'[-+]\s*\d+', raw.lower())
             if match:
