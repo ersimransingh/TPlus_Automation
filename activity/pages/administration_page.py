@@ -8,6 +8,7 @@ from pywinauto import Desktop
 from pywinauto.keyboard import send_keys
 from pywinauto.findwindows import ElementNotFoundError
 from PIL import ImageGrab
+from date_engine import to_custom
 
 def capture_screenshot(filepath):
     """
@@ -186,32 +187,30 @@ def resolve_password_value(val):
     except Exception:
         return clean_val    
 
-def parse_relative_date(date_token, date_format="%d%m%Y"):
+def get_scheduler_json_path():
     """
-    Parses dynamic date tokens such as 't', 't-1', 't+2' into specific string formats.
-    e.g. 't' -> Today
-         't-1' -> Yesterday
+    Bulletproof locator for scheduler.json. Scans the parent directory, 
+    the active directory, and the execution root.
     """
-    date_token = str(date_token).strip().lower()
+    candidates = [
+        # 1. Standard Client Setup: One level up from the activity folder
+        os.path.abspath(os.path.join(ACTIVITY_DIR, "..", "scheduler.json")),
+        # 2. Fallback: Inside the activity folder itself
+        os.path.join(ACTIVITY_DIR, "scheduler.json"),
+        # 3. Fallback: The current terminal/CMD working directory root
+        os.path.abspath(os.path.join(os.getcwd(), "scheduler.json")),
+        # 4. Fallback: One level up from the current terminal working directory
+        os.path.abspath(os.path.join(os.getcwd(), "..", "scheduler.json"))
+    ]
     
-    # Baseline is today
-    target_date = datetime.now()
-    
-    if date_token.startswith("t"):
-        modifier = date_token[1:]  # Extracts '-1', '+2', etc.
-        if modifier:
-            try:
-                # Calculate delta offset based on operator sign
-                days_offset = int(modifier)
-                target_date += timedelta(days=days_offset)
-            except ValueError:
-                pass  # Fallback to today if string structure is corrupted
-        
-        return target_date.strftime(date_format)
-    
-    # Return raw text fallback if token syntax is not recognized
-    return date_token
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+            
+    return None    
 
+def parse_relative_date(date_token, date_format="%d%m%Y"):
+    return to_custom(date_token, fmt=date_format)
 
 def _derive_menu_name(step):
     if 'name' in step and step['name']:

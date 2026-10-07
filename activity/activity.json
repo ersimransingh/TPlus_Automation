@@ -73,7 +73,7 @@
         "class_name": "MSMaskWndClass",
         "class_occurrence_index": 0,
         "action": "type_date",
-        "value": "t-62"
+        "value": "t-64"
       },
       {
         "description": "Select Client Name from Yellow Dropdown",
@@ -87,7 +87,7 @@
         "automation_id": "3",
         "control_type": "Button",
         "action": "click_browse",
-        "target_folder": "t-62",
+        "target_folder": "t-64",
         "target_file_pattern": "CLN_MSTR_"
       },
       {
@@ -109,7 +109,7 @@
         "class_name": "MSMaskWndClass",
         "class_occurrence_index": 0,
         "action": "type_date",
-        "value": "t-62"
+        "value": "t-64"
       },
       {
         "description": "Select Client Name from Yellow Dropdown",
@@ -123,7 +123,7 @@
         "automation_id": "3",
         "control_type": "Button",
         "action": "click_browse",
-        "target_folder": "t-62",
+        "target_folder": "t-64",
         "target_file_pattern": "ISIN_MSTR_"
       },
       {
@@ -145,7 +145,7 @@
         "class_name": "MSMaskWndClass",
         "class_occurrence_index": 0,
         "action": "type_date",
-        "value": "t-62"
+        "value": "t-64"
       },
       {
         "description": "Select Client Name from Yellow Dropdown",
@@ -159,7 +159,7 @@
         "automation_id": "3",
         "control_type": "Button",
         "action": "click_browse",
-        "target_folder": "t-62",
+        "target_folder": "t-64",
         "folder_date_format": "%d%b%Y",
         "target_file_pattern": "SOT_EXP",
         "target_file_ends_with": ".csv"
@@ -183,7 +183,7 @@
         "class_name": "MSMaskWndClass",
         "class_occurrence_index": 0,
         "action": "type_date",
-        "value": "t-63"
+        "value": "t-65"
       },
       {
         "description": "Select Client Name from Yellow Dropdown",
@@ -197,7 +197,7 @@
         "automation_id": "3",
         "control_type": "Button",
         "action": "click_browse",
-        "target_folder": "t-62",
+        "target_folder": "t-64",
         "target_file_pattern": "ISIN_RATE_"
       },
       {
@@ -219,7 +219,7 @@
         "class_name": "MSMaskWndClass",
         "class_occurrence_index": 0,
         "action": "type_date",
-        "value": "t-62"
+        "value": "t-64"
       },
       {
         "description": "Select Client Name from Yellow Dropdown",
@@ -233,7 +233,7 @@
         "automation_id": "3",
         "control_type": "Button",
         "action": "click_browse",
-        "target_folder": "t-62",
+        "target_folder": "t-64",
         "target_file_pattern": "SOH_EXP_"
       },
       {
@@ -294,7 +294,7 @@
         "class_name": "MSMaskWndClass",
         "class_occurrence_index": 0,
         "action": "type_date",
-        "value": "t-62"
+        "value": "t-1"
         
       },
       {
@@ -309,7 +309,7 @@
         "automation_id": "3",
         "control_type": "Button",
         "action": "click_browse",
-        "target_folder": "t-62",
+        "target_folder": "t-1",
         "target_file_pattern": "ISIN_MSTR_"
         
       },
@@ -332,7 +332,7 @@
         "class_name": "MSMaskWndClass",
         "class_occurrence_index": 0,
         "action": "type_date",
-        "value": "t-62"
+        "value": "t-1"
         
       },
       {
@@ -347,7 +347,7 @@
         "automation_id": "3",
         "control_type": "Button",
         "action": "click_browse",
-        "target_folder": "t-62",
+        "target_folder": "t-1",
         "folder_date_format": "%d%b%Y",
         "target_file_pattern": "SOT_EXP",
         "target_file_ends_with": ".csv"
@@ -372,7 +372,7 @@
         "class_name": "MSMaskWndClass",
         "class_occurrence_index": 0,
         "action": "type_date",
-        "value": "t-63"
+        "value": "t-1"
         
       },
       {
@@ -387,7 +387,7 @@
         "automation_id": "3",
         "control_type": "Button",
         "action": "click_browse",
-        "target_folder": "t-62",
+        "target_folder": "t-1",
         "target_file_pattern": "ISIN_RATE_"
         
       },
@@ -410,7 +410,7 @@
         "class_name": "MSMaskWndClass",
         "class_occurrence_index": 0,
         "action": "type_date",
-        "value": "t-62"
+        "value": "t-1"
         
       },
       {
@@ -425,7 +425,7 @@
         "automation_id": "3",
         "control_type": "Button",
         "action": "click_browse",
-        "target_folder": "t-62",
+        "target_folder": "t-1",
         "target_file_pattern": "SOH_EXP_"
         
       },

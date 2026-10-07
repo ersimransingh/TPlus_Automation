@@ -181,32 +181,10 @@ def get_cli_arg(param_name, default_val=None):
 
 def apply_in_memory_token_override(process_dict):
     """
-    Applies OVERRIDE_TARGET_TOKEN passed from manager in-memory to steps
-    only for standard daily tokens, leaving explicit test offsets untouched.
+    Token overrides are now disabled in the router.
+    administration_page.py automatically evaluates EVERY token ('t-1', 't-61')
+    against the calendar independently, making memory hacking unnecessary.
     """
-    override = os.environ.get("OVERRIDE_TARGET_TOKEN")
-    if not override or not isinstance(process_dict, dict):
-        return process_dict
-
-    override_token = override.strip().lower()
-    steps = process_dict.get("steps", [])
-
-    for s in steps:
-        if not isinstance(s, dict):
-            continue
-
-        # ONLY override standard daily tokens (t-1, t, t-0)
-        # NEVER touch historical test offsets like t-61, t-62, t-63
-        if s.get("action") == "type_date":
-            val = str(s.get("value", "")).strip().lower()
-            if val in ["t-1", "t", "t-0"]:
-                s["value"] = override_token
-
-        elif s.get("action") == "click_browse":
-            folder = str(s.get("target_folder", "")).strip().lower()
-            if folder in ["t-1", "t", "t-0"]:
-                s["target_folder"] = override_token
-
     return process_dict
 
 def resolve_config_path(config_arg):

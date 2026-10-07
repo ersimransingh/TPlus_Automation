@@ -24,6 +24,7 @@ from pywinauto.mouse import click as mouse_click
 from PIL import ImageGrab
 import datetime
 from datetime import datetime, date, timedelta
+from date_engine import to_picker, to_folder, to_yyyymmdd
 
 try:
     ctypes.windll.shcore.SetProcessDpiAwareness(2)
@@ -81,123 +82,29 @@ def capture_screenshot(tag_name="Dialog_OK"):
 import re
 from datetime import datetime, date, timedelta
 
+# Import date helpers directly from the central date engine
+try:
+    from date_engine import to_date_components, to_folder, to_yyyymmdd
+except ImportError:
+    from activity.date_engine import to_date_components, to_folder, to_yyyymmdd
+
 def get_date_components(date_str):
-    """
-    Parses date_str into (day, month, year) tuples safely.
-    Handles relative dates (t-1, t-4) and absolute formatted dates.
-    """
-    if not date_str:
-        today = date.today()  # <--- FIX: Use 'date.today()' directly instead of 'datetime.date.today()'
-        return today.strftime("%d"), today.strftime("%b").capitalize(), today.strftime("%Y")
-
-    normalized = str(date_str).strip().lower()
-
-    if "t" in normalized and ("-" in normalized or "+" in normalized):
-        try:
-            match = re.search(r'[-+]\s*\d+', normalized)
-            if match:
-                offset = int(match.group().replace(" ", ""))
-                target_dt = date.today() + timedelta(days=offset)
-                return target_dt.strftime("%d"), target_dt.strftime("%b").capitalize(), target_dt.strftime("%Y")
-        except Exception as err:
-            print(f"⚠️ [DATE ERROR] Could not parse relative offset '{date_str}': {err}")
-
-    # Fallback parsing for YYYYMMDD or dd-Mon-YYYY strings
-    for fmt in ("%Y%m%d", "%d-%b-%Y", "%Y-%m-%d", "%d/%m/%Y"):
-        try:
-            parsed_dt = datetime.strptime(normalized, fmt)
-            return parsed_dt.strftime("%d"), parsed_dt.strftime("%b").capitalize(), parsed_dt.strftime("%Y")
-        except ValueError:
-            continue
-
-    # Default fallback
-    today = date.today()
-    return today.strftime("%d"), today.strftime("%b").capitalize(), today.strftime("%Y")
+    """Parses date token into ('07', 'Oct', '2026') via date_engine."""
+    override = os.environ.get("OVERRIDE_TARGET_TOKEN")
+    token = override if override else (date_str or "t")
+    return to_date_components(token)
 
 def resolve_date_string(date_str):
-    """
-    Formats dates into standardized folder string format (e.g., '03Aug2026').
-    """
-    if not date_str:
-        return "Downloaded_Reports"
-
-    normalized = str(date_str).strip().lower()
-    today_dt = date.today()  # FIXED: Use 'date.today()' directly
-
-    if normalized in ("t", "today"):
-        target_date = today_dt
-    elif normalized == "yesterday":
-        target_date = today_dt - timedelta(days=1)  # FIXED
-    elif normalized == "tomorrow":
-        target_date = today_dt + timedelta(days=1)   # FIXED
-    elif normalized.startswith("t") and ("-" in normalized or "+" in normalized):
-        try:
-            offset_match = re.search(r'[-+]\s*\d+', normalized)
-            if offset_match:
-                offset = int(offset_match.group().replace(" ", ""))
-                target_date = today_dt + timedelta(days=offset)  # FIXED
-            else:
-                target_date = today_dt
-        except Exception:
-            target_date = today_dt
-    else:
-        try:
-            target_date = datetime.strptime(normalized.replace("-", ""), "%Y%m%d").date()
-        except Exception:
-            return normalized.replace("-", "")
-
-    day = target_date.strftime("%d")
-    month = target_date.strftime("%b").capitalize()  # Outputs '03Aug2026'
-    year = target_date.strftime("%Y")
-    return f"{day}{month}{year}"
-
+    """Standardizes target folder format to '07Oct2026' via date_engine."""
+    override = os.environ.get("OVERRIDE_TARGET_TOKEN")
+    token = override if override else (date_str or "t")
+    return to_folder(token)
 
 def resolve_date_yyyymmdd(date_str):
-    """
-    Strictly resolves date expressions (e.g., 't-1', '06-Aug-2026', '20260806') 
-    to exact 'YYYYMMDD' (e.g., '20260806').
-    """
-    if not date_str:
-        return date.today().strftime("%Y%m%d")  # FIXED: date.today() instead of datetime.date.today()
-
-    normalized = str(date_str).strip().lower()
-    today_dt = date.today()  # FIXED
-
-    if normalized in ("t", "today"):
-        target_date = today_dt
-    elif normalized == "yesterday":
-        target_date = today_dt - timedelta(days=1)
-    elif normalized == "tomorrow":
-        target_date = today_dt + timedelta(days=1)
-    elif "t" in normalized and ("-" in normalized or "+" in normalized):
-        try:
-            match = re.search(r'[-+]\s*\d+', normalized)
-            if match:
-                offset = int(match.group().replace(" ", ""))
-                target_date = today_dt + timedelta(days=offset)
-            else:
-                target_date = today_dt
-        except Exception as err:
-            print(f"⚠️ [DATE ENGINE WARNING] Could not parse relative offset '{date_str}': {err}")
-            target_date = today_dt
-    else:
-        # Check if already a pure YYYYMMDD string
-        clean_digits = re.sub(r'\D', '', normalized)
-        if len(clean_digits) == 8:
-            return clean_digits
-        
-        # Try explicit string parsing
-        for fmt in ("%d-%b-%Y", "%Y-%m-%d", "%d/%m/%Y", "%Y/%m/%d"):
-            try:
-                target_date = datetime.strptime(normalized, fmt).date()
-                return target_date.strftime("%Y%m%d")
-            except ValueError:
-                continue
-        target_date = today_dt
-
-    resolved_str = target_date.strftime("%Y%m%d")
-    print(f"📅 [DATE ENGINE] Resolved input '{date_str}' -> YYYYMMDD: '{resolved_str}'")
-    return resolved_str
+    """Resolves date token to '20261007' for OCR searches via date_engine."""
+    override = os.environ.get("OVERRIDE_TARGET_TOKEN")
+    token = override if override else (date_str or "t")
+    return to_yyyymmdd(token)
 
 def send_notification_email(email_settings, subject, body, attachments=None):
     if not email_settings:
@@ -715,8 +622,14 @@ def resolve_dynamic_pattern(pattern_config, global_config=None):
 def process_single_report_task(app, report_win, task, task_index, total_tasks, email_settings, global_config):
     module_id = str(task.get("module_id") or task.get("MODULE_ID", "")).strip()
     report_id = str(task.get("report_id") or task.get("REPORT_ID", "")).strip()
-    date_from_raw = str(task.get("business_date_from") or task.get("BUSINESS_DATE_FROM", "")).strip()
-    date_to_raw = str(task.get("business_date_to") or task.get("BUSINESS_DATE_TO", "")).strip()
+    
+    # Priority: Use manager's holiday-adjusted token if provided
+    override_token = os.environ.get("OVERRIDE_TARGET_TOKEN")
+    raw_from = str(task.get("business_date_from") or task.get("BUSINESS_DATE_FROM", "")).strip()
+    raw_to = str(task.get("business_date_to") or task.get("BUSINESS_DATE_TO", "")).strip()
+
+    date_from_raw = override_token if override_token else raw_from
+    date_to_raw = override_token if override_token else raw_to
     
     # READ RAW PATTERN FROM TASK
     raw_pattern = task.get("target_file_pattern") or task.get("TARGET_FILE_PATTERN", [])
@@ -751,23 +664,28 @@ def process_single_report_task(app, report_win, task, task_index, total_tasks, e
         time.sleep(0.1)
         send_keys(report_id, with_spaces=True)
 
+    def set_control_date(pane, day_val, month_val, year_val):
+        pane.click_input()
+        time.sleep(0.15)
+        send_keys("{LEFT 3}")
+        time.sleep(0.1)
+        d_num = f"{int(day_val):02d}"
+        m_num = f"{int(month_val):02d}"
+        # Send raw 8 digits straight without {RIGHT} to prevent auto-advancing skips
+        send_keys(f"{d_num}{m_num}{year_val}")
+        time.sleep(0.2)
+
     # 3. Fill From Date
     if day_from and month_from and year_from:
         date_from_pane = report_win.child_window(auto_id="_Date_from", control_type="Pane")
-        date_from_pane.click_input()
-        time.sleep(0.1)
-        send_keys("{HOME}{LEFT}{LEFT}")
-        send_keys(day_from + "{RIGHT}" + month_from + "{RIGHT}" + year_from)
+        set_control_date(date_from_pane, day_from, month_from, year_from)
 
     # 4. Fill To Date
     if day_to and month_to and year_to:
         date_to_pane = report_win.child_window(auto_id="_Date_To", control_type="Pane")
-        date_to_pane.click_input()
-        time.sleep(0.1)
-        send_keys("{HOME}{LEFT}{LEFT}")
-        send_keys(day_to + "{RIGHT}" + month_to + "{RIGHT}" + year_to)
+        set_control_date(date_to_pane, day_to, month_to, year_to)
         time.sleep(0.3)
-
+        
     print("Locating download transaction trigger switch...")
     download_btn = report_win.child_window(title="Download", auto_id="_cmd_Download", control_type="Button")
     download_btn.click_input()

@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.image import MIMEImage
+from activity.date_engine import resolve_date_details
 
 # Screen Recording Dependencies
 import cv2
@@ -50,6 +51,11 @@ def get_cli_arg(param_name, default_val=None):
 # Resolve Config File Locations Dynamically
 SCHEDULER_PATH = get_cli_arg("--config") or os.path.join(BASE_DIR, "scheduler.json")
 CUSTOM_ACTIVITY_JSON = get_cli_arg("--activity")
+HOLIDAYS_PATH = get_cli_arg("--holidays") or os.path.join(BASE_DIR, "holidays.json")
+if not os.path.exists(HOLIDAYS_PATH):
+    alt_h = os.path.join(BASE_DIR, "Holidays.json")
+    if os.path.exists(alt_h):
+        HOLIDAYS_PATH = alt_h
 
 def resolve_activity_json_path():
     if CUSTOM_ACTIVITY_JSON and os.path.exists(CUSTOM_ACTIVITY_JSON):
@@ -69,11 +75,15 @@ RECORDINGS_BASE_DIR = os.path.join(ACTIVITY_DIR, "recordings")
 def log_message(message, level="INFO"):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     formatted_msg = f"[{timestamp}] [{level}] {message}"
-    try:
-        print(formatted_msg)
-    except Exception:
-        print(formatted_msg.encode('ascii', 'ignore').decode('ascii'))
     
+    # Check if a console exists before trying to print
+    if sys.stdout is not None:
+        try:
+            print(formatted_msg)
+        except Exception:
+            pass
+    
+    # Write to log file regardless of whether a console window is open
     date_str = datetime.now().strftime("%Y-%m-%d")
     log_dir = os.path.join(SCHEDULER_LOGS_DIR, date_str)
     os.makedirs(log_dir, exist_ok=True)
@@ -678,23 +688,26 @@ def send_token_adjustment_email(process_name, original_token, effective_token, a
         log_message(f"⚠️ Failed to send adjustment notice email: {e}", "WARNING")
 
 
-def is_non_working_day(scheduler_cfg=None):
+def is_non_working_day():
     """
-    Checks if TODAY is a weekend or configured holiday in scheduler.json.
+    Checks if TODAY is a weekend or configured holiday in holidays.json.
     """
     now = datetime.now()
-    if not scheduler_cfg and os.path.exists(SCHEDULER_PATH):
-        try:
-            with open(SCHEDULER_PATH, 'r', encoding='utf-8') as f:
-                scheduler_cfg = json.load(f)
-        except Exception:
-            scheduler_cfg = {}
-            
-    holiday_cfg = (scheduler_cfg or {}).get("holiday_settings", {})
+    holiday_cfg = {}
     
-    # 1. Check Weekend
+    target_path = HOLIDAYS_PATH if os.path.exists(HOLIDAYS_PATH) else os.path.join(BASE_DIR, "holiday.json")
+    if os.path.exists(target_path):
+        try:
+            with open(target_path, 'r', encoding='utf-8') as f:
+                raw = json.load(f)
+                holiday_cfg = raw.get("holiday_settings", raw)
+        except Exception as e:
+            log_message(f"⚠️ Warning reading holidays config: {e}", "WARNING")
+            holiday_cfg = {}
+
+    # 1. Check Weekend (defaults to Sunday only, as defined in holidays.json)
     skip_weekends = holiday_cfg.get("skip_weekends", True)
-    weekend_days = [d.strip().lower() for d in holiday_cfg.get("weekend_days", ["Saturday", "Sunday"])]
+    weekend_days = [d.strip().lower() for d in holiday_cfg.get("weekend_days", ["sunday"])]
     if skip_weekends and now.strftime("%A").lower() in weekend_days:
         return True, f"Weekend ({now.strftime('%A')})"
 
@@ -713,85 +726,53 @@ def is_non_working_day(scheduler_cfg=None):
     return False, ""
 
 def get_effective_working_token(process_name):
-    """
-    Reads the base token (prioritizing base_value so overrides don't stick).
-    If that target date lands on Sunday or a holiday, rolls back to Saturday (or earlier working day).
-    Returns (effective_token, base_token, reason_text).
-    """
     base_token = "t-1"
     try:
         if os.path.exists(ACTIVITY_PATH):
             with open(ACTIVITY_PATH, 'r', encoding='utf-8') as f:
                 act_data = json.load(f)
-            steps = act_data.get(process_name, {}).get("steps", [])
-            for s in steps:
-                raw_val = s.get("base_value") or s.get("value", "")
-                if s.get("action") == "type_date" and str(raw_val).lower().startswith("t-"):
-                    base_token = str(raw_val).strip().lower()
-                    break
-                raw_folder = s.get("base_target_folder") or s.get("target_folder", "")
-                if s.get("action") == "click_browse" and str(raw_folder).lower().startswith("t-"):
-                    base_token = str(raw_folder).strip().lower()
-                    break
+            process_cfg = act_data.get(process_name, {})
+
+            def find_token(data):
+                if isinstance(data, dict):
+                    for k, v in data.items():
+                        if isinstance(v, str):
+                            cv = v.strip().lower()
+                            if cv in ("t", "today", "yesterday") or cv.startswith("t-") or cv.startswith("t+"):
+                                return cv
+                        res = find_token(v)
+                        if res: return res
+                elif isinstance(data, list):
+                    for item in data:
+                        res = find_token(item)
+                        if res: return res
+                return None
+
+            found = find_token(process_cfg)
+            if found:
+                base_token = found
     except Exception as e:
         log_message(f"⚠️ Error reading base token for {process_name}: {e}", "WARNING")
 
+    # Delegate date resolution and rollback to date_engine
     try:
-        offset_days = int(base_token.replace("t-", ""))
-    except ValueError:
-        offset_days = 1
+        from activity.date_engine import resolve_date_details
+    except ImportError:
+        from activity.date_engine import resolve_date_details
 
-    # Load holiday configuration
-    try:
-        with open(SCHEDULER_PATH, 'r', encoding='utf-8') as f:
-            sched_cfg = json.load(f)
-    except Exception:
-        sched_cfg = {}
+    target_business_dt, skipped_days = resolve_date_details(base_token)
+    today_dt = datetime.now().date()
+    day_diff = (today_dt - target_business_dt).days
 
-    holiday_cfg = sched_cfg.get("holiday_settings", {})
-    weekend_days = [d.strip().lower() for d in holiday_cfg.get("weekend_days", ["Sunday"])]
-    raw_holidays = holiday_cfg.get("holidays", [])
+    effective_token = f"t-{day_diff}" if day_diff > 0 else ("t" if day_diff == 0 else f"t+{abs(day_diff)}")
+    final_str = target_business_dt.strftime("%d-%b-%Y (%A)")
 
-    holiday_dates = set()
-    for h in raw_holidays:
-        for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%d-%b-%Y"):
-            try:
-                holiday_dates.add(datetime.strptime(str(h).strip(), fmt).date())
-                break
-            except ValueError:
-                continue
-
-    now = datetime.now()
-    target_dt = now - timedelta(days=offset_days)
-    adjusted_offset = offset_days
-    skipped_reasons = []
-
-    # Roll backward while target date is Sunday or Holiday
-    while target_dt.strftime("%A").lower() in weekend_days or target_dt.date() in holiday_dates:
-        day_name = target_dt.strftime("%A")
-        date_str = target_dt.strftime("%d-%b-%Y")
-        
-        if day_name.lower() in weekend_days:
-            skipped_reasons.append(f"{date_str} ({day_name})")
-        else:
-            skipped_reasons.append(f"{date_str} (Holiday)")
-
-        adjusted_offset += 1
-        target_dt = now - timedelta(days=adjusted_offset)
-
-    effective_token = f"t-{adjusted_offset}"
-    final_target_str = target_dt.strftime("%d-%b-%Y (%A)")
-
-    if skipped_reasons:
-        reason_text = (
-            f"Original token '{base_token}' landed on off-day: {', '.join(skipped_reasons)}. "
-            f"Rolled back to last working day: {final_target_str}"
-        )
+    if skipped_days:
+        reason_text = f"Token '{base_token}' landed on off-day: {', '.join(skipped_days)}. Rolled back to: {final_str}"
     else:
-        reason_text = f"Target date for '{base_token}' is a valid working day: {final_target_str}"
+        reason_text = f"Token '{base_token}' resolved to valid working day: {final_str}"
 
     return effective_token, base_token, reason_text
-
 
 def trigger_existing_script(process_name):
     start_total_time = datetime.now()
@@ -936,6 +917,9 @@ def trigger_existing_script(process_name):
             else:
                 cmd = [sys.executable, existing_script_exe, "--config", ACTIVITY_PATH, "--process", process_name]
 
+            # Suppress window creation for child processes on Windows
+            creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+
             result = subprocess.run(
                 cmd,
                 cwd=ACTIVITY_DIR,
@@ -943,7 +927,8 @@ def trigger_existing_script(process_name):
                 capture_output=True, 
                 text=True, 
                 encoding="utf-8",
-                errors="replace"
+                errors="replace",
+                creationflags=creation_flags
             )
             
             if recording_thread:
