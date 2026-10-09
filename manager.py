@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.image import MIMEImage
+from activity.date_engine import resolve_date_details
 
 # Screen Recording Dependencies
 import cv2
@@ -50,6 +51,11 @@ def get_cli_arg(param_name, default_val=None):
 # Resolve Config File Locations Dynamically
 SCHEDULER_PATH = get_cli_arg("--config") or os.path.join(BASE_DIR, "scheduler.json")
 CUSTOM_ACTIVITY_JSON = get_cli_arg("--activity")
+HOLIDAYS_PATH = get_cli_arg("--holidays") or os.path.join(BASE_DIR, "holidays.json")
+if not os.path.exists(HOLIDAYS_PATH):
+    alt_h = os.path.join(BASE_DIR, "Holidays.json")
+    if os.path.exists(alt_h):
+        HOLIDAYS_PATH = alt_h
 
 def resolve_activity_json_path():
     if CUSTOM_ACTIVITY_JSON and os.path.exists(CUSTOM_ACTIVITY_JSON):
@@ -69,11 +75,15 @@ RECORDINGS_BASE_DIR = os.path.join(ACTIVITY_DIR, "recordings")
 def log_message(message, level="INFO"):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     formatted_msg = f"[{timestamp}] [{level}] {message}"
-    try:
-        print(formatted_msg)
-    except Exception:
-        print(formatted_msg.encode('ascii', 'ignore').decode('ascii'))
     
+    # Check if a console exists before trying to print
+    if sys.stdout is not None:
+        try:
+            print(formatted_msg)
+        except Exception:
+            pass
+    
+    # Write to log file regardless of whether a console window is open
     date_str = datetime.now().strftime("%Y-%m-%d")
     log_dir = os.path.join(SCHEDULER_LOGS_DIR, date_str)
     os.makedirs(log_dir, exist_ok=True)
@@ -315,6 +325,40 @@ def record_license_audit_log(cdsl_id, nsdl_id, http_status, raw_response, verifi
     """
     pass
 
+def latest_result_entry(process_name):
+    """Reads log.json to find the final result written by activity.py."""
+    try:
+        summary_file_path = os.path.join(SCHEDULER_LOGS_DIR, "log.json")
+        if not os.path.exists(summary_file_path):
+            return None
+        
+        with open(summary_file_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            
+        if not isinstance(data, list):
+            return None
+            
+        clean_name = str(process_name).strip().lower()
+        matches = [
+            e for e in data 
+            if str(e.get("task") or "").strip().lower() == clean_name
+        ]
+        
+        if not matches:
+            return None
+            
+        last_entry = matches[-1]
+        status = str(last_entry.get("Status") or last_entry.get("status") or "").strip().lower()
+        
+        # Skip the manager's 'started' marker to get the real outcome from activity.py
+        if status == "started":
+            return None
+            
+        return last_entry
+    except Exception as e:
+        log_message(f"⚠️ Error reading latest result entry: {e}", "WARNING")
+        return None
+
 def write_summary_log(process_name, status_result):
     try:
         os.makedirs(SCHEDULER_LOGS_DIR, exist_ok=True)
@@ -416,7 +460,7 @@ def check_remote_status(task_config):
 
     return True
 
-def send_manager_status_email(process_name, status, attempts_used, max_retries, duration_str=None, video_path=None):
+def send_manager_status_email(process_name, status, attempts_used, max_retries, duration_str=None, video_path=None,skip_reason=None):
     """
     Dispatches a formatted Log Status Update Report email dynamically.
     Reads global SMTP/sender configuration from activity.json, but overrides 
@@ -499,8 +543,13 @@ def send_manager_status_email(process_name, status, attempts_used, max_retries, 
         except Exception:
             smtp_password = raw_pwd
 
-        is_success = str(status).upper() == "SUCCESS"
-        status_color = "#28a745" if is_success else "#dc3545"
+        status_upper = str(status).upper()
+        if "SUCCESS" in status_upper:
+            status_color = "#28a745"
+        elif "SKIPPED" in status_upper:
+            status_color = "#ff9800"
+        else:
+            status_color = "#dc3545"
 
         subject = f"{system_title} Report: {process_name} - {status.upper()}"
 
@@ -559,8 +608,215 @@ def send_manager_status_email(process_name, status, attempts_used, max_retries, 
     except Exception as email_err:
         log_message(f"⚠️ Failed to send manager status email: {email_err}", "ERROR")
 
+def send_token_adjustment_email(process_name, original_token, effective_token, adjustment_reason):
+    """Dispatches notice to client before process starts when token shifts (e.g. t-1 -> t-2)."""
+    try:
+        if not os.path.exists(ACTIVITY_PATH):
+            return
+
+        with open(ACTIVITY_PATH, 'r', encoding='utf-8') as f:
+            act_data = json.load(f)
+
+        email_cfg = act_data.get("email_settings") or act_data.get("EMAIL_SETTINGS", {})
+        if not email_cfg:
+            return
+
+        # Target recipient override from scheduler.json
+        to_email = None
+        if os.path.exists(SCHEDULER_PATH):
+            try:
+                with open(SCHEDULER_PATH, 'r', encoding='utf-8') as sf:
+                    sched_data = json.load(sf)
+                    tasks = sched_data.get("scheduled_tasks") or sched_data.get("SCHEDULED_TASKS", [])
+                    for task in tasks:
+                        task_p_name = task.get("process_name") or task.get("Process_name")
+                        if str(task_p_name).strip().lower() == str(process_name).strip().lower():
+                            task_email_cfg = task.get("email_settings") or task.get("EMAIL_SETTINGS", {})
+                            to_email = task.get("reporting_email") or task_email_cfg.get("reporting_email") or task.get("to")
+                            break
+                    if not to_email:
+                        sched_email_cfg = sched_data.get("email_settings") or sched_data.get("EMAIL_SETTINGS", {})
+                        to_email = sched_email_cfg.get("reporting_email") or sched_email_cfg.get("to")
+            except Exception:
+                pass
+
+        if not to_email:
+            to_email = email_cfg.get("reporting_email") or email_cfg.get("to") or email_cfg.get("from_email") or email_cfg.get("username", "")
+        from_email = email_cfg.get("from_email") or email_cfg.get("username", "")
+
+        if not from_email or not to_email:
+            return
+
+        smtp_host = email_cfg.get("host") or email_cfg.get("smtp_server", "smtp.gmail.com")
+        smtp_port = int(email_cfg.get("port") or email_cfg.get("smtp_port", 587))
+        use_tls = email_cfg.get("use_tls", True)
+
+        raw_pwd = email_cfg.get("password_enc") or email_cfg.get("PASSWORD_ENC") or email_cfg.get("password", "")
+        try:
+            smtp_password = base64.b64decode(raw_pwd).decode("utf-8")
+        except Exception:
+            smtp_password = raw_pwd
+
+        subject = f"Automation Schedule Adjustment Notice: {process_name} - Target Shifted to [{effective_token.upper()}]"
+        
+        body = (
+            f"Dear Team,\n\n"
+            f"Please be advised that the scheduler has adjusted the target data date for '{process_name}' prior to task initiation.\n\n"
+            f"• Process: {process_name}\n"
+            f"• Original Token: {original_token.upper()}\n"
+            f"• Adjusted Token: {effective_token.upper()}\n"
+            f"• Reason: {adjustment_reason}\n"
+            f"• Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+            f"The task will automatically process files associated with this business working date.\n\n"
+            f"Universal Automation Engine"
+        )
+
+        msg = MIMEText(body, "plain", "utf-8")
+        msg["Subject"] = subject
+        msg["From"] = from_email
+        msg["To"] = to_email
+
+        log_message(f"📧 Sending Schedule Adjustment Notice to '{to_email}'...", "INFO")
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=30) as server:
+            if use_tls:
+                server.starttls()
+            if email_cfg.get("username"):
+                server.login(email_cfg["username"], smtp_password)
+            server.sendmail(from_email, [to_email], msg.as_string())
+        log_message(f"✅ Schedule Adjustment Notice successfully dispatched to '{to_email}'", "INFO")
+    except Exception as e:
+        log_message(f"⚠️ Failed to send adjustment notice email: {e}", "WARNING")
+
+
+def is_non_working_day():
+    """
+    Checks if TODAY is a weekend or configured holiday in holidays.json.
+    """
+    now = datetime.now()
+    holiday_cfg = {}
+    
+    target_path = HOLIDAYS_PATH if os.path.exists(HOLIDAYS_PATH) else os.path.join(BASE_DIR, "holiday.json")
+    if os.path.exists(target_path):
+        try:
+            with open(target_path, 'r', encoding='utf-8') as f:
+                raw = json.load(f)
+                holiday_cfg = raw.get("holiday_settings", raw)
+        except Exception as e:
+            log_message(f"⚠️ Warning reading holidays config: {e}", "WARNING")
+            holiday_cfg = {}
+
+    # 1. Check Weekend (Only active if explicitly defined in holidays.json)
+    skip_weekends = holiday_cfg.get("skip_weekends", False)
+    weekend_days = [d.strip().lower() for d in holiday_cfg.get("weekend_days", [])]
+    if skip_weekends and now.strftime("%A").lower() in weekend_days:
+       return True, f"Weekend ({now.strftime('%A')})"
+
+    # 2. Check Holidays
+    holidays = holiday_cfg.get("holidays", [])
+    accepted_formats = ["%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%d-%b-%Y"]
+    today_date = now.date()
+    for h in holidays:
+        for fmt in accepted_formats:
+            try:
+                if datetime.strptime(str(h).strip(), fmt).date() == today_date:
+                    return True, f"Configured Holiday ({h})"
+            except ValueError:
+                continue
+
+    return False, ""
+
+def get_effective_working_token(process_name):
+    base_token = "t-1"
+    try:
+        if os.path.exists(ACTIVITY_PATH):
+            with open(ACTIVITY_PATH, 'r', encoding='utf-8') as f:
+                act_data = json.load(f)
+            process_cfg = act_data.get(process_name, {})
+
+            def find_token(data):
+                if isinstance(data, dict):
+                    for k, v in data.items():
+                        if isinstance(v, str):
+                            cv = v.strip().lower()
+                            if cv in ("t", "today", "yesterday") or cv.startswith("t-") or cv.startswith("t+"):
+                                return cv
+                        res = find_token(v)
+                        if res: return res
+                elif isinstance(data, list):
+                    for item in data:
+                        res = find_token(item)
+                        if res: return res
+                return None
+
+            found = find_token(process_cfg)
+            if found:
+                base_token = found
+    except Exception as e:
+        log_message(f"⚠️ Error reading base token for {process_name}: {e}", "WARNING")
+
+    # Delegate date resolution and rollback to date_engine
+    try:
+        from activity.date_engine import resolve_date_details
+    except ImportError:
+        from activity.date_engine import resolve_date_details
+
+    target_business_dt, skipped_days = resolve_date_details(base_token)
+    today_dt = datetime.now().date()
+    day_diff = (today_dt - target_business_dt).days
+
+    effective_token = f"t-{day_diff}" if day_diff > 0 else ("t" if day_diff == 0 else f"t+{abs(day_diff)}")
+    final_str = target_business_dt.strftime("%d-%b-%Y (%A)")
+
+    if skipped_days:
+        reason_text = f"Token '{base_token}' landed on off-day: {', '.join(skipped_days)}. Rolled back to: {final_str}"
+    else:
+        reason_text = f"Token '{base_token}' resolved to valid working day: {final_str}"
+
+    return effective_token, base_token, reason_text
+
 def trigger_existing_script(process_name):
     start_total_time = datetime.now()
+
+   # Pre-fetch configured max retries for email reporting
+    try:
+        with open(SCHEDULER_PATH, 'r', encoding='utf-8') as f:
+            sched_cfg = json.load(f)
+        tasks = sched_cfg.get("scheduled_tasks") or sched_cfg.get("SCHEDULED_TASKS", [])
+        t_cfg = next((t for t in tasks if (t.get("process_name") or t.get("Process_name")) == process_name), {})
+        configured_retries = int(t_cfg.get("retry_count") or t_cfg.get("RETRY_COUNT") or 1)
+    except Exception:
+        configured_retries = 1
+
+    # --- 1. ONLY SKIP IF TODAY IS A NON-WORKING DAY (Sunday or Holiday) ---
+    is_today_off, today_reason = is_non_working_day()
+    if is_today_off:
+        skip_msg = "SKIPPED"
+        log_message(f"⏸️ Skipping execution for '{process_name}': Today is {today_reason}.", "INFO")
+        
+        send_manager_status_email(
+            process_name=process_name,
+            status=skip_msg,
+            attempts_used=0,
+            max_retries=configured_retries,
+            duration_str="0s",
+            video_path="N/A (Skipped)",
+            skip_reason=f"Execution skipped because today is {today_reason}."
+        )
+        return
+    
+   # 2. DYNAMICALLY ADJUST TARGET TOKEN (Rolls Sunday/Holiday back to Saturday)
+    effective_token, base_token, token_reason = get_effective_working_token(process_name)
+    
+    # --- THIS LINE ALWAYS WRITES TO scheduler_execution.log ---
+    log_message(f"📅 Token audit for '{process_name}' -> using [{effective_token}] | {token_reason}", "INFO")
+
+    if effective_token != base_token:
+        send_token_adjustment_email(
+            process_name=process_name,
+            original_token=base_token,
+            effective_token=effective_token,
+            adjustment_reason=token_reason
+        )
 
     # 1. RUN 7-DAY LICENSE / USAGE CHECK FIRST
     license_ok, license_msg = check_client_license_status()
@@ -637,6 +893,7 @@ def trigger_existing_script(process_name):
     custom_env = os.environ.copy()
     custom_env["PYTHONIOENCODING"] = "utf-8"
     custom_env["PYTHONUTF8"] = "1"
+    custom_env["OVERRIDE_TARGET_TOKEN"] = effective_token
 
     for attempt in range(1, max_retries + 1):
         log_message(f"🏃 [Attempt {attempt}/{max_retries}] Starting execution for process: {process_name}...")
@@ -660,6 +917,9 @@ def trigger_existing_script(process_name):
             else:
                 cmd = [sys.executable, existing_script_exe, "--config", ACTIVITY_PATH, "--process", process_name]
 
+            # Suppress window creation for child processes on Windows
+            creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+
             result = subprocess.run(
                 cmd,
                 cwd=ACTIVITY_DIR,
@@ -667,7 +927,8 @@ def trigger_existing_script(process_name):
                 capture_output=True, 
                 text=True, 
                 encoding="utf-8",
-                errors="replace"
+                errors="replace",
+                creationflags=creation_flags
             )
             
             if recording_thread:
@@ -681,13 +942,19 @@ def trigger_existing_script(process_name):
             if result.stdout:
                 log_message(f"Script stdout:\n{result.stdout.strip()}")
 
-            # CHECK BOTH EXIT CODE AND STDOUT FOR SUCCESS SIGNATURES
-            is_success = (
-                result.returncode == 0 and 
-                "❌ Automation process terminated with errors" not in combined_output and
-                "UNSUCCESS" not in combined_output
-            )
+            # --- READ THE REAL OUTCOME FROM LOG.JSON ---
+            act_entry = latest_result_entry(process_name)
+            if act_entry is not None:
+                act_status = str(act_entry.get("Status") or act_entry.get("status") or "").strip().lower()
+                is_success = (act_status == "success")
+            else:
+                is_success = (
+                    result.returncode == 0 and 
+                    "❌ Automation process terminated with errors" not in combined_output and
+                    "UNSUCCESS" not in combined_output
+                )
 
+            
             if is_success:
                 duration_delta = str(datetime.now() - start_total_time)
                 log_message(f"✅ Success: {process_name} executed successfully.", "INFO")

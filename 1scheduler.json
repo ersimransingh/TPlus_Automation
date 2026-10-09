@@ -1,8 +1,8 @@
 {
   "manager_config": {
-    "activity_json_path": "C:\\Users\\Admin\\Desktop\\Main code\\_AUTOMATION_TEST\\activity\\activity.json",
+    "activity_json_path": "C:\\Users\\Admin\\Desktop\\Main_code\\_AUTOMATION_TEST\\activity\\activity.json",
     "timezone": "Local",
-    "global_alert_fallback": "jatingori72@gmail.com",
+    "global_alert_fallback": "preston75@zohomail.in",
     "retry_on_failure": true
   },
   "scheduled_tasks": [
@@ -23,11 +23,11 @@
           "time": false,
           "result": true,
           "task": false,
-          "status_path": "D:\\CDSL_AUTOMATION\\ACTIVITY\\Schedule_log\\log.json"
+          "status_path": "C:\\Users\\Admin\\Desktop\\Main_code\\_AUTOMATION_TEST\\activity\\schedule_log"
         }
       ],
       "mail": {
-        "to": "jatingori72@gmail.com",
+        "to": "preston75@zohomail.in",
         "cc": "",
         "subject": "CRITICAL SCHEDULER FAILURE [Process_01]"
       }

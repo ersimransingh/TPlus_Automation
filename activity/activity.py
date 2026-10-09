@@ -67,6 +67,68 @@ RESERVED_KEYS = {
 }
 
 
+# --- Shared task-result ledger (log.json) -----------------------------------
+def default_log_json_path():
+    return os.path.join(SCRIPT_DIR, "schedule_log", "log.json")
+
+def resolve_log_json_path():
+    target_path = get_cli_arg("--config") or get_cli_arg("-c")
+    try:
+        if target_path and os.path.exists(target_path):
+            with open(target_path, 'r', encoding='utf-8') as f:
+                cfg = json.load(f)
+            override = cfg.get("log_json")
+            if override:
+                if os.path.isabs(override):
+                    return override
+                return os.path.join(SCRIPT_DIR, override)
+    except Exception:
+        pass
+    return default_log_json_path()
+
+def get_log_json_path():
+    if not hasattr(get_log_json_path, "_cached"):
+        get_log_json_path._cached = resolve_log_json_path()
+    return get_log_json_path._cached
+
+def load_log_ledger():
+    ledger_path = get_log_json_path()
+    if not os.path.exists(ledger_path):
+        return []
+    try:
+        with open(ledger_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+def append_log_entry(entry):
+    ledger_path = get_log_json_path()
+    try:
+        os.makedirs(os.path.dirname(ledger_path), exist_ok=True)
+        entries = load_log_ledger()
+        entries.append(entry)
+        tmp_path = ledger_path + ".tmp"
+        with open(tmp_path, 'w', encoding='utf-8') as f:
+            json.dump(entries, f, indent=2)
+        os.replace(tmp_path, ledger_path)
+    except Exception as err:
+        logger.warning(f"Failed to append activity ledger entry: {err}")
+
+def write_activity_result(process_name, ok, reason=""):
+    """Record the real business outcome for a process in the shared ledger."""
+    now = datetime.now()
+    entry = {
+        "date": now.strftime("%d-%b-%Y"),
+        "task": process_name,
+        "Status": "success" if ok else "unsuccess",
+        "time": now.strftime("%H:%M:%S"),
+    }
+    append_log_entry(entry)
+    logger.info(f"Ledger result recorded for '{process_name}': {'success' if ok else 'failure'}")
+
+
+
 def resolve_password_value(val):
     """
     Safely resolves Base64 encoded or plain text passwords.
@@ -117,6 +179,13 @@ def get_cli_arg(param_name, default_val=None):
             return sys.argv[idx + 1]
     return default_val
 
+def apply_in_memory_token_override(process_dict):
+    """
+    Token overrides are now disabled in the router.
+    administration_page.py automatically evaluates EVERY token ('t-1', 't-61')
+    against the calendar independently, making memory hacking unnecessary.
+    """
+    return process_dict
 
 def resolve_config_path(config_arg):
     """Resolves local or absolute path to the target activity JSON file."""
@@ -314,10 +383,12 @@ def run_universal_automation():
     # Retrieve process dictionary safely
     process_data = master_config.get(matched_key, {})
 
+    # Apply manager's working-day token in-memory (ZERO writes to activity.json)
+    process_data = apply_in_memory_token_override(process_data)
+
     # 2. FORCE update environment variables BEFORE calling App.py / CDAS Pipeline
     os.environ["ACTIVE_TASK_ID"] = str(matched_key).lower().strip()
     os.environ["DYNAMIC_RUN_PROFILE"] = json.dumps(process_data)
-
     logger.info(f"🔑 Environment ACTIVE_TASK_ID set to: '{os.environ['ACTIVE_TASK_ID']}'")
     logger.info(f"📦 Environment DYNAMIC_RUN_PROFILE keys: {list(process_data.keys())}")
 
@@ -348,11 +419,11 @@ def run_universal_automation():
         from pywinauto import Application, Desktop
         from pywinauto.keyboard import send_keys
         from pages.administration_page import handle_administration
+        # Integrated imports: Forensics + Screen Recorder
         from pages.administration_page import _is_process_alive, _log_forensic_window_state, _send_keys_traced
         from screenshot_util import capture_screenshot as capture_startup_screenshot
         from screen_recorder import ScreenRecorder
 
-        # Retrieve app path from global or root profile
         app_path = master_config.get('app_path') or (master_config.get('global_app_settings') or {}).get('app_path')
         if not app_path:
             raise ValueError("Missing 'app_path' configuration setting inside activity.json")
@@ -381,14 +452,11 @@ def run_universal_automation():
         except Exception as tl_err:
             logger.debug(f"Post-taskkill verification skipped: {tl_err}")
 
-        # Initialize screen recorder
         full_execution_recorder = ScreenRecorder()
         exec_time_str = datetime.now().strftime("%H-%M-%S")
-        full_execution_folder_name = f"Full Execution_{exec_time_str}"
-        full_execution_recorder.start(full_execution_folder_name)
+        full_execution_recorder.start(f"Full Execution_{exec_time_str}")
 
         backend_type = master_config.get('backend', 'uia')
-
         try:
             logger.info(f"Launching target binary: {app_path}")
             app = Application(backend=backend_type).start(app_path)
@@ -450,9 +518,9 @@ def run_universal_automation():
                     f"Login window never appeared; a blocking startup dialog was detected "
                     f"(app windows: {blocker_titles})."
                 )
+
             logger.info("Login modal container detected.")
 
-            # --- Inside run_universal_automation() where common_steps are processed ---
             common_steps = master_config.get('common_steps', [])
             for index, step in enumerate(common_steps, start=1):
                 logger.info(f"Executing Login Step {index}: {step.get('description', '')}")
@@ -472,13 +540,7 @@ def run_universal_automation():
                     element.type_keys("^a{BACKSPACE}", with_spaces=True)
                     time.sleep(0.2)
 
-                    # --- RESOLVE BASE64 OR PLAIN TEXT VALUE FOR BOTH 'value_enc' AND 'value' ---
-                    raw_val = (
-                        step.get('value_enc') or 
-                        step.get('VALUE_ENC') or 
-                        step.get('value') or 
-                        step.get('VALUE', '')
-                    )
+                    raw_val = (step.get('value_enc') or step.get('VALUE_ENC') or step.get('value') or step.get('VALUE', ''))
                     resolved_val = resolve_password_value(raw_val)
 
                     element.type_keys(resolved_val, with_spaces=True, pause=0.05)
@@ -490,12 +552,26 @@ def run_universal_automation():
 
             logger.info("Login sequence finalized. Waiting for desktop workspace interface...")
             time.sleep(4.0)
-
-            # Run process sequence
+            
+           # Run process sequence
             logger.info(f"=== Starting process execution: '{matched_key}' ===")
-            handle_administration(main_window, process_data, global_config=master_config, process_name=matched_key)
+            import_failed = False
+            failure_reason = ""
+            try:
+                # TRACKING: Capture the return tuple from administration_page
+                result = handle_administration(main_window, process_data, global_config=master_config, process_name=matched_key)
+                if result and isinstance(result, tuple):
+                    import_failed, failure_reason = bool(result[0]), str(result[1] or "")
+            except Exception as proc_err:
+                import_failed = True
+                failure_reason = f"Process execution raised: {proc_err}"
+                logger.error(f"Process execution failed: {proc_err}")
+                
             logger.info(f"=== Process execution completed: '{matched_key}' ===")
 
+            # RECORD RESULT: Write the final outcome to your custom JSON ledger
+            write_activity_result(matched_key, ok=not import_failed, reason=failure_reason)
+            
             # Check auto_close setting
             auto_close_flag = master_config.get("auto_close", False)
             if auto_close_flag:
@@ -551,11 +627,15 @@ def run_universal_automation():
                     logger.warning(f"Auto-close fallback: {close_err}")
                     _send_keys_traced("auto_close exception fallback", "{LEFT}{ENTER}")
 
+            # Hard exit if failure occurred so manager registers the failure
+            if import_failed:
+                logger.error("Automation process terminated with errors (import_failed).")
+                sys.exit(1)
+
         finally:
             if full_execution_recorder.is_active():
                 logger.info("Finalizing background video recorder tracking...")
                 full_execution_recorder.stop()
-
     # --- BRANCH 3: TRADEPLUS AUTOMATION PIPELINE ---
     elif "execution_pipeline" in master_config or "app_config" in master_config:
         logger.info("📈 [ROUTER] Signature Matched: TRADEPLUS AUTOMATION PIPELINE")

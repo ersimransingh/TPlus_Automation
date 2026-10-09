@@ -143,11 +143,11 @@
     ]
   },
   "email_settings": {
-    "host": "smtp.gmail.com",
+    "host": "smtp.zoho.in",
     "port": 587,
     "use_tls": true,
-    "username": "User@mail.com",
-    "password_enc": "",
-    "from_email": ""
+    "username": "preston75@zohomail.in",
+    "password_enc": "YxpwK5VJb1Ww",
+    "from_email": "preston75@zohomail.in"
   }
 }

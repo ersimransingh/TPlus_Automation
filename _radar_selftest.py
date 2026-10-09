@@ -11,7 +11,7 @@ import sys, os, traceback
 PAGES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "activity", "pages")
 sys.path.insert(0, PAGES)
 
-import administration_page as ap
+from activity.pages import administration_page as ap
 
 # ---------------------------------------------------------------- fakes
 STATE = {"tick": 0, "pid_windows": [], "popup_exists": False}
@@ -48,6 +48,11 @@ class FakeSpec:
         if self.name == "popup":
             return STATE.get("popup_title", "Cross")
         return "Cross - DP Back office Software"
+
+    # --- NEW---
+    def class_name(self): return "ThunderRT6FormDC"
+    def is_visible(self): return True
+    # -------------------------
     def process_id(self): return 4242
     def menu_select(self, *a, **kw):
         if STATE.get("menu_select_raises"):
@@ -71,6 +76,14 @@ class FakeWin:
         self.element_info = _FakeElemInfo(auto_id)
     def window_text(self): return self._t
     def click_input(self, **kw): STATE.setdefault("menu_clicks", []).append(self._t)
+
+    # --- NEW LINES ---
+    def class_name(self): return "RichTextWndClass" if "error" in self._t.lower() else "#32770"
+    def is_visible(self): return True
+    def process_id(self): return 4242
+    def set_focus(self): pass
+    def close(self): pass
+    # -------------------------
 
 class FakeDesktop:
     def __init__(self, backend=None): pass

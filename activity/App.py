@@ -17,6 +17,7 @@ from PIL import Image, ImageEnhance
 import pytesseract
 from pywinauto import Application
 from pywinauto.keyboard import send_keys
+from date_engine import to_web
 
 from pages.report_download import execute_report_download_form
 from pages.report_setup import execute_report_setup_form 
@@ -252,20 +253,22 @@ def load_config():
 
     return global_settings
 
+#date_engine
 def parse_standalone_date(expr_str):
-    clean_expr = str(expr_str).strip().lower()
-    base_date = datetime.now()
-    if clean_expr in ('t', 'today'):
-        return base_date.strftime("%d-%b-%Y")
-    elif clean_expr == 'yesterday':
-        return (base_date - timedelta(days=1)).strftime("%d-%b-%Y")
-    match = re.match(r"^t\s*([\+\-])\s*(\d+)$", clean_expr)
-    if match:
-        op, offset = match.group(1), int(match.group(2))
-        target_date = base_date - timedelta(days=offset) if op == '-' else base_date + timedelta(days=offset)
-        return target_date.strftime("%d-%b-%Y")
-    return expr_str
-
+    """
+    Resolves dates using date_engine, honoring manager overrides and holidays.
+    Always returns 'dd-Mon-YYYY' (e.g., '06-Oct-2026').
+    """
+    override_token = os.environ.get("OVERRIDE_TARGET_TOKEN")
+    token_to_use = override_token if override_token else expr_str
+    try:
+        from date_engine import to_web
+        return to_web(token_to_use)
+    except Exception:
+        # Fallback if imported from a nested context
+        from activity.date_engine import to_web
+        return to_web(token_to_use)
+    
 def load_task_toggles():
     data = load_activity_master()
     email_cfg = data.get("email_settings") or data.get("EMAIL_SETTINGS", {})

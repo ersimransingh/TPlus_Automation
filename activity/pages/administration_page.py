@@ -8,6 +8,12 @@ from pywinauto import Desktop
 from pywinauto.keyboard import send_keys
 from pywinauto.findwindows import ElementNotFoundError
 from PIL import ImageGrab
+# Direct module import first (PyInstaller-friendly); fall back to package import
+# when loaded from the repo root (selftest / manager contexts).
+try:
+    from date_engine import to_custom
+except ImportError:
+    from activity.date_engine import to_custom
 
 def capture_screenshot(filepath):
     """
@@ -39,34 +45,15 @@ def get_activity_dir():
 ACTIVITY_DIR = get_activity_dir()
 PAGES_DIR = os.path.join(ACTIVITY_DIR, "pages")
 
-# Add paths to sys.path dynamically
-for p in (PAGES_DIR, ACTIVITY_DIR):
-    if p not in sys.path:
-        sys.path.insert(0, p)
-
-# Direct module imports (No 'activity.' prefix to prevent PyInstaller import crashes)
-from logger_config import setup_logger
-from screen_recorder import ScreenRecorder, build_batch_folder_name
-from screenshot_util import capture_screenshot
-from mail_sender import send_batch_report_email
-
-logger = setup_logger()
-
-# Main output directory anchored dynamically to the real activity directory
-BASE_OUTPUT_DIR = os.path.join(ACTIVITY_DIR, "Screenshots")
-
 def _is_process_alive(pid):
-    """True when the OS still reports a running process for pid (stdlib only, safe on frozen UIA threads)."""
-    if not pid:
-        return False
+    if not pid: return False
     try:
         import ctypes
         PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
         STILL_ACTIVE = 259
         kernel32 = ctypes.windll.kernel32
         handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
-        if not handle:
-            return False
+        if not handle: return False
         try:
             exit_code = ctypes.c_ulong()
             if kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
@@ -78,13 +65,11 @@ def _is_process_alive(pid):
         return False
 
 def _get_foreground_window_info():
-    """Best-effort foreground window title + PID via stdlib ctypes (used by action tracing)."""
     try:
         import ctypes
         user32 = ctypes.windll.user32
         hwnd = user32.GetForegroundWindow()
-        if not hwnd:
-            return "<none>"
+        if not hwnd: return "<none>"
         buf = ctypes.create_unicode_buffer(256)
         user32.GetWindowTextW(hwnd, buf, 256)
         pid = ctypes.c_ulong()
@@ -94,29 +79,20 @@ def _get_foreground_window_info():
         return "<unknown>"
 
 def _send_keys_traced(location, keys):
-    """Sends keystrokes AND records what was sent plus the foreground window, so any
-    keypress that dismisses a dialog (and could close the app) is traceable in the logs."""
     logger.info(f"[KEY-TRACE] {location}: sending {keys!r} | foreground: {_get_foreground_window_info()}")
     send_keys(keys)
 
 _EXIT_DIALOG_HINTS = ("exit", "close", "quit", "terminate")
 
 def _inspect_dialog(dialog):
-    """Returns (title, message_texts, button_titles) best-effort, for tracing dialog decisions."""
     title = ""
     texts, buttons = [], []
-    try:
-        title = str(dialog.window_text())
-    except Exception:
-        pass
-    try:
-        texts = [str(t.window_text()) for t in dialog.descendants(control_type="Text")][:5]
-    except Exception:
-        pass
-    try:
-        buttons = [str(b.window_text()) for b in dialog.descendants(control_type="Button")][:8]
-    except Exception:
-        pass
+    try: title = str(dialog.window_text())
+    except Exception: pass
+    try: texts = [str(t.window_text()) for t in dialog.descendants(control_type="Text")][:5]
+    except Exception: pass
+    try: buttons = [str(b.window_text()) for b in dialog.descendants(control_type="Button")][:8]
+    except Exception: pass
     return title, texts, buttons
 
 def _looks_like_exit_dialog(title, texts):
@@ -124,15 +100,10 @@ def _looks_like_exit_dialog(title, texts):
     return any(h in joined for h in _EXIT_DIALOG_HINTS)
 
 def _get_child_processes(parent_pid):
-    """{pid: exe_name} of LIVE processes whose parent is parent_pid (stdlib ToolHelp32).
-    Used to detect helper exes the app spawns to do the real import work (e.g. Cross
-    launches CSVTransformer.exe with a visible console for ISIN master files)."""
-    if not parent_pid:
-        return {}
+    if not parent_pid: return {}
     try:
         import ctypes
         from ctypes import wintypes
-
         TH32CS_SNAPPROCESS = 0x00000002
         k32 = ctypes.windll.kernel32
         k32.CreateToolhelp32Snapshot.restype = ctypes.c_void_p
@@ -141,21 +112,15 @@ def _get_child_processes(parent_pid):
 
         class PE32W(ctypes.Structure):
             _fields_ = [
-                ("dwSize", wintypes.DWORD),
-                ("cntUsage", wintypes.DWORD),
-                ("th32ProcessID", wintypes.DWORD),
-                ("th32DefaultHeapID", ctypes.c_size_t),
-                ("th32ModuleID", wintypes.DWORD),
-                ("cntThreads", wintypes.DWORD),
-                ("th32ParentProcessID", wintypes.DWORD),
-                ("pcPriClassBase", wintypes.LONG),
-                ("dwFlags", wintypes.DWORD),
-                ("szExeFile", ctypes.c_wchar * 260),
+                ("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD),
+                ("th32ProcessID", wintypes.DWORD), ("th32DefaultHeapID", ctypes.c_size_t),
+                ("th32ModuleID", wintypes.DWORD), ("cntThreads", wintypes.DWORD),
+                ("th32ParentProcessID", wintypes.DWORD), ("pcPriClassBase", wintypes.LONG),
+                ("dwFlags", wintypes.DWORD), ("szExeFile", ctypes.c_wchar * 260),
             ]
 
         snap = k32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
-        if not snap or snap == ctypes.c_void_p(-1).value:
-            return {}
+        if not snap or snap == ctypes.c_void_p(-1).value: return {}
         children = {}
         try:
             entry = PE32W()
@@ -172,13 +137,11 @@ def _get_child_processes(parent_pid):
         return {}
 
 def _get_foreground_pid():
-    """PID of the current foreground window via stdlib ctypes (None when unknown)."""
     try:
         import ctypes
         user32 = ctypes.windll.user32
         hwnd = user32.GetForegroundWindow()
-        if not hwnd:
-            return None
+        if not hwnd: return None
         pid = ctypes.c_ulong()
         user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
         return pid.value or None
@@ -186,7 +149,6 @@ def _get_foreground_pid():
         return None
 
 def _log_forensic_window_state(context, target_pid=None):
-    """Logs all top-level window titles (plus PID liveness when given) so client-side failures are diagnosable from the log alone."""
     try:
         desktop = Desktop(backend="uia")
         titles = [w.window_text() for w in desktop.windows()]
@@ -197,6 +159,22 @@ def _log_forensic_window_state(context, target_pid=None):
         logger.error(f"[FORENSICS:{context}] Top-level windows on screen: {titles}{pid_detail}")
     except Exception as forensics_err:
         logger.debug(f"Forensic window enumeration failed: {forensics_err}")
+
+# Add paths to sys.path dynamically
+for p in (PAGES_DIR, ACTIVITY_DIR):
+    if p not in sys.path:
+        sys.path.insert(0, p)
+
+# Direct module imports (No 'activity.' prefix to prevent PyInstaller import crashes)
+from logger_config import setup_logger
+from screen_recorder import ScreenRecorder, build_batch_folder_name
+from screenshot_util import capture_screenshot
+from mail_sender import send_batch_report_email
+
+logger = setup_logger()
+
+# Main output directory anchored dynamically to the real activity directory
+BASE_OUTPUT_DIR = os.path.join(ACTIVITY_DIR, "Screenshots")
 
 def resolve_password_value(val):
     """Decodes Base64 if valid; returns plain text as-is if not."""
@@ -212,34 +190,32 @@ def resolve_password_value(val):
             return decoded_str
         return clean_val
     except Exception:
-        return clean_val
+        return clean_val    
+
+def get_scheduler_json_path():
+    """
+    Bulletproof locator for scheduler.json. Scans the parent directory, 
+    the active directory, and the execution root.
+    """
+    candidates = [
+        # 1. Standard Client Setup: One level up from the activity folder
+        os.path.abspath(os.path.join(ACTIVITY_DIR, "..", "scheduler.json")),
+        # 2. Fallback: Inside the activity folder itself
+        os.path.join(ACTIVITY_DIR, "scheduler.json"),
+        # 3. Fallback: The current terminal/CMD working directory root
+        os.path.abspath(os.path.join(os.getcwd(), "scheduler.json")),
+        # 4. Fallback: One level up from the current terminal working directory
+        os.path.abspath(os.path.join(os.getcwd(), "..", "scheduler.json"))
+    ]
+    
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+            
+    return None    
 
 def parse_relative_date(date_token, date_format="%d%m%Y"):
-    """
-    Parses dynamic date tokens such as 't', 't-1', 't+2' into specific string formats.
-    e.g. 't' -> Today
-         't-1' -> Yesterday
-    """
-    date_token = str(date_token).strip().lower()
-    
-    # Baseline is today
-    target_date = datetime.now()
-    
-    if date_token.startswith("t"):
-        modifier = date_token[1:]  # Extracts '-1', '+2', etc.
-        if modifier:
-            try:
-                # Calculate delta offset based on operator sign
-                days_offset = int(modifier)
-                target_date += timedelta(days=days_offset)
-            except ValueError:
-                pass  # Fallback to today if string structure is corrupted
-        
-        return target_date.strftime(date_format)
-    
-    # Return raw text fallback if token syntax is not recognized
-    return date_token
-
+    return to_custom(date_token, fmt=date_format)
 
 def _derive_menu_name(step):
     if 'name' in step and step['name']:
@@ -265,19 +241,22 @@ def handle_administration(main_window, process_config, global_config=None, proce
 
     skip_until_next_batch = False
     import_failed = False
+    overall_process_failed = False
     failure_reason = ""
     skipped_step_count = 0
 
-    # Helper to resolve SMTP settings cleanly across configurations
+# Helper to resolve SMTP settings cleanly across configurations
     smtp_config = (global_config or {}).get("email_settings") or (global_config or {}).get("smtp_config") or {}
 
-    # Resolve the app PID once while the window is responsive. Re-resolving the main
-    # window spec fails on VB6 apps whenever the UI thread is blocked (import running)
-    # because the window stops answering UIA property requests.
     try:
         cached_app_pid = main_window.process_id()
     except Exception:
         cached_app_pid = None
+    
+    try:
+        main_frame_title = str(main_window.window_text()).strip()
+    except Exception:
+        main_frame_title = ""
 
     # Main frame title, captured while the app is responsive. Used to distinguish
     # the main window from result dialogs that carry the SAME app-name title
@@ -290,6 +269,8 @@ def handle_administration(main_window, process_config, global_config=None, proce
     menu_steps = [s for s in steps if s.get('control_type') == "MenuItem" and s.get('action') == "click"]
     other_steps = [s for s in steps if s.get('control_type') != "MenuItem" or s.get('action') != "click"]
 
+    menu_steps = [s for s in steps if s.get('control_type') == "MenuItem" and s.get('action') == "click"]
+    other_steps = [s for s in steps if s.get('control_type') != "MenuItem" or s.get('action') != "click"]    
     # ============================================================
     # 1. FULLY DYNAMIC MENU NAVIGATION
     # ============================================================
@@ -404,9 +385,36 @@ def handle_administration(main_window, process_config, global_config=None, proce
             ctrl_type = step.get('control_type', 'Button')
 
             if skip_until_next_batch:
-                if action in ["select_dropdown", "switch_tab", "click_close"]:
+                # 1. Added 'type_date' so the engine resets properly for the ISIN file
+                if action in ["type_date", "select_dropdown", "switch_tab", "click_close"]:
                     logger.info(f"Resetting error bypass flag. Found next setup action configuration entry: {action}")
                     skip_until_next_batch = False
+
+                    # 2. Latch the overall failure for the Manager Summary, but reset local flags
+                    if import_failed:
+                        overall_process_failed = True
+                    import_failed = False
+                    failure_reason = ""
+                    
+                    # ====================================================
+                    # PRE-FLIGHT SWEEP: DESTROY GHOST WINDOWS BEFORE STARTING
+                    # ====================================================
+                    try:
+                        target_pid = main_window.process_id()
+                        desktop_win32 = Desktop(backend="win32")
+                        for leftover_win in desktop_win32.windows(visible_only=True):
+                            if leftover_win.process_id() == target_pid:
+                                w_title = leftover_win.window_text()
+                                if "report" in w_title.lower() and "estro" not in w_title.lower().strip()[:5]:
+                                    logger.info(f"Pre-flight sweep caught hidden ghost window: {w_title}. Destroying...")
+                                    try:
+                                        leftover_win.close()
+                                        time.sleep(0.4)
+                                    except Exception:
+                                        pass
+                    except Exception as sweep_err:
+                        logger.debug(f"Pre-flight sweep bypassed: {sweep_err}")
+                    # ====================================================
                 else:
                     skipped_step_count += 1
                     logger.info(f"Skipping dependency step due to previous File-Not-Found state: {desc}")
@@ -453,7 +461,6 @@ def handle_administration(main_window, process_config, global_config=None, proce
                     time.sleep(1.0)
                 except Exception as e:
                     logger.error(f"Failed to dynamically process tab change: {e}", exc_info=True)
-                    _log_forensic_window_state("switch_tab")
                     raise RuntimeError(f"Failed to dynamically process tab change: {e}")
 
             # ============================================================
@@ -593,7 +600,7 @@ def handle_administration(main_window, process_config, global_config=None, proce
                         actual_saved_path = capture_screenshot(screenshot_path) or screenshot_path
                         
                         table_rows = [
-                            ("Process Status", "FAILED"),
+                            ("Process Status", "SKIPPED - FOLDER NOT FOUND"),
                             ("Process Name", process_name),
                             ("Error Captured", f"Folder Not Found: {target_subfolder}"),
                             ("Client Context", current_client_value),
@@ -601,13 +608,18 @@ def handle_administration(main_window, process_config, global_config=None, proce
                         ]
                         try:
                             send_batch_report_email(smtp_config, mail_config, table_rows, actual_saved_path, f"CRITICAL ERROR: Folder Not Found - {process_name}")
+                            logger.info(f"📧 Folder skip notification email dispatched for '{target_subfolder}'")
                         except Exception as email_err:
-                            pass
+                            logger.error(f"⚠️ Failed to transmit folder error email: {email_err}")
                         # ---------------------------------------------
                         
+                        import_failed = True
+                        overall_process_failed = True
+                        skipped_step_count += 1
+                        failure_reason = f"Folder Not Found: {target_subfolder}"
+
                         skip_until_next_batch = True
                         continue
-
                     # Search disk for file matching prefix and optional suffix
                     target_file_name = ""
                     for file_name in os.listdir(final_target_directory):
@@ -621,7 +633,7 @@ def handle_administration(main_window, process_config, global_config=None, proce
                         if starts_match and ends_match:
                             target_file_name = file_name
                             break
-
+                    
                     if not target_file_name:
                         logger.error(f"CRITICAL ERROR: No file matching '{target_pattern}' in '{final_target_directory}'")
                         if recorder.is_active():
@@ -635,7 +647,7 @@ def handle_administration(main_window, process_config, global_config=None, proce
                         actual_saved_path = capture_screenshot(screenshot_path) or screenshot_path
                         
                         table_rows = [
-                            ("Process Status", "FAILED"),
+                            ("Process Status", "SKIPPED - FILE NOT FOUND"),
                             ("Process Name", process_name),
                             ("Error Captured", f"File Not Found: {target_pattern}"),
                             ("Client Context", current_client_value),
@@ -643,10 +655,16 @@ def handle_administration(main_window, process_config, global_config=None, proce
                         ]
                         try:
                             send_batch_report_email(smtp_config, mail_config, table_rows, actual_saved_path, f"CRITICAL ERROR: File Not Found - {process_name}")
+                            logger.info(f"📧 File skip notification email dispatched for '{target_pattern}'")
                         except Exception as email_err:
-                            pass
+                            logger.error(f"⚠️ Failed to transmit file error email: {email_err}")
                         # ---------------------------------------------
                         
+                        import_failed = True
+                        overall_process_failed = True
+                        skipped_step_count += 1
+                        failure_reason = f"File Not Found: {target_pattern}"
+
                         skip_until_next_batch = True
                         continue
 
@@ -988,7 +1006,6 @@ def handle_administration(main_window, process_config, global_config=None, proce
                             if fatal_dialog.exists(timeout=1.5):
                                 failure_reason = fatal_dialog.window_text()
                                 logger.warning(f"Detected Application Error Layer Context: '{failure_reason}'")
-                                
                                 fatal_dialog.set_focus()
                                 time.sleep(0.2)
                                 f_title, f_texts, f_buttons = _inspect_dialog(fatal_dialog)
@@ -1060,13 +1077,38 @@ def handle_administration(main_window, process_config, global_config=None, proce
             elif action == "wait_for_table":
                 logger.info(f"Executing Table Loading Verification Step: {desc}")
                 try:
-                    import_window = _get_target_window(step)
+                    logger.info("Waiting dynamically for data grid to populate (bypassing 'Not Responding' UI freezes)...")
                     
-                    if auto_id:
-                        table_grid = import_window.child_window(auto_id=str(auto_id), control_type=ctrl_type)
-                    else:
-                        grid_cls = step.get('class_name', 'MSHFlexGridWndClass')
-                        table_grid = import_window.child_window(class_name=grid_cls, control_type=ctrl_type, found_index=0)
+                    max_timeout = step.get('timeout', 300) 
+                    start_time = time.time()
+                    table_ready = False
+                    
+                    while (time.time() - start_time) < max_timeout:
+                        try:
+                            import_window = _get_target_window(step)
+                            
+                            if auto_id:
+                                table_grid = import_window.child_window(auto_id=str(auto_id), control_type=ctrl_type)
+                            else:
+                                grid_cls = step.get('class_name', 'MSHFlexGridWndClass')
+                                table_grid = import_window.child_window(class_name=grid_cls, control_type=ctrl_type, found_index=0)
+
+                            # RESTORED: Native strict check. 
+                            # If app is frozen/processing, this will purposefully fail and trigger the 'except' block
+                            table_grid.wait('exists', timeout=2)
+                            table_grid.wait('ready', timeout=2)
+                            
+                            # If it gets here without throwing an error, the thread is genuinely unlocked
+                            table_ready = True
+                            break
+                        except Exception:
+                            # Safely swallow TimeoutError and ElementNotFoundError while app processes
+                            pass
+                            
+                        time.sleep(2.0)
+                        
+                    if not table_ready:
+                        raise TimeoutError(f"Table did not load after {max_timeout} seconds.")
 
                     grid_timeout = step.get('timeout', 300)
 
@@ -1124,9 +1166,8 @@ def handle_administration(main_window, process_config, global_config=None, proce
             elif action == "click_ok":
                 logger.info(f"Executing Process Confirmation Target Step: {desc}")
                 desktop = Desktop(backend="uia")
+                desktop_win32 = Desktop(backend="win32")
                 target_pid = cached_app_pid
-                
-                # Check up to 5 consecutive dialog popups (handles consecutive error/info popups)
                 max_dialog_checks = step.get('max_popup_count', 5)
                 dialogs_cleared = 0
                 exit_dialog_seen = False
@@ -1134,6 +1175,7 @@ def handle_administration(main_window, process_config, global_config=None, proce
                 for check_idx in range(1, max_dialog_checks + 1):
                     logger.info(f"Polling for active pop-up dialog window (Attempt {check_idx}/{max_dialog_checks})...")
                     btn_clicked = False
+                    active_dialog = None
 
                     # Strategy 1: Search top-level modal popups strictly within target application PID.
                     # Result dialogs often carry the app name itself as their title (e.g. a popup
@@ -1201,6 +1243,27 @@ def handle_administration(main_window, process_config, global_config=None, proce
                                 exit_dialog_seen = True
                                 break
 
+                            # DATA EXTRACTION: Read specific internal label texts (e.g. RichText fields)
+                            body_texts = [active_dialog.window_text()]
+                            clean_report_text = ""
+                            for ctrl in active_dialog.descendants():
+                                try:
+                                    t = ctrl.window_text().strip()
+                                    if t: body_texts.append(t)
+                                    if ctrl.class_name() == "RichTextWndClass":
+                                        clean_report_text = t
+                                except Exception:
+                                    pass
+
+                            # FAILURE EVALUATION: flag the run when the dialog text carries
+                            # known error keywords (RichText fields carry the real report).
+                            full_popup_text = " ".join(body_texts).lower()
+                            if any(word in full_popup_text for word in ["error", "fatal", "warning", "fail", "invalid", "not found", "unsuccess", "mismatch"]):
+                                logger.warning("Tampered file error caught in modal.")
+                                import_failed = True
+                                overall_process_failed = True
+                                failure_reason = clean_report_text.replace('\n', ' ').strip() if clean_report_text else dlg_title
+
                             # Find target button inside modal
                             if auto_id:
                                 target_btn = active_dialog.child_window(auto_id=str(auto_id), control_type=ctrl_type)
@@ -1208,11 +1271,13 @@ def handle_administration(main_window, process_config, global_config=None, proce
                                 btn_title = step.get('title') or step.get('text', 'OK')
                                 target_btn = active_dialog.child_window(title_re=f"(?i).*{re.escape(btn_title)}.*", control_type=ctrl_type)
 
+                            # Click OK / Yes / Close
+                            btn_title = step.get('title') or step.get('text', 'OK')
+                            target_btn = active_dialog.child_window(title_re=f"(?i).*{re.escape(btn_title)}.*", class_name="Button")
                             if not target_btn.exists():
-                                target_btn = active_dialog.child_window(title_re=r"(?i).*(OK|Yes|Close|Dismiss).*", control_type="Button")
+                                target_btn = active_dialog.child_window(title_re=r"(?i).*(OK|Yes|Close|Dismiss).*", class_name="Button")
 
-                            if target_btn.exists(timeout=1):
-                                logger.info(f"🖱️ Clicking button '{target_btn.window_text()}' inside popup dialog #{check_idx}...")
+                            if target_btn.exists():
                                 target_btn.click_input()
                                 dialogs_cleared += 1
                                 btn_clicked = True
@@ -1243,7 +1308,7 @@ def handle_administration(main_window, process_config, global_config=None, proce
                         except Exception:
                             pass
 
-                    # Strategy 3: Single modal dismissal via ENTER keypress
+                    # Fallback keypress dismissal
                     if not btn_clicked:
                         if check_idx == 1:
                             # ENTER presses the DEFAULT button, which is 'Yes' on close/exit
@@ -1274,37 +1339,75 @@ def handle_administration(main_window, process_config, global_config=None, proce
 
                 logger.info(f"✓ Cleared total of {dialogs_cleared} pop-up dialog window(s).")
 
+                # WIN32 AGGRESSIVE SWEEP AND DESTROY POST-OK
+                logger.info("Sweeping strictly for secondary white report windows post-OK...")
+                time.sleep(1.5)
+                try:
+                    desktop_win32 = Desktop(backend="win32") 
+                    
+                    for leftover_win in desktop_win32.windows(visible_only=True):
+                        if leftover_win.process_id() == cached_app_pid:
+                            w_title = leftover_win.window_text()
+                            
+                            # STRICT FILTER: Only destroy windows that contain "Report" in the title
+                            if "report" in w_title.lower() and "estro" not in w_title.lower().strip()[:5]:
+                                logger.info(f"Target locked. Destroying specific report window: {w_title}")
+                                
+                                try:
+                                    leftover_win.set_focus()
+                                    time.sleep(0.2)
+                                    leftover_win.close() 
+                                    time.sleep(0.5)
+                                except Exception:
+                                    pass
+                                
+                                if leftover_win.exists():
+                                    try:
+                                        send_keys("%{F4}")
+                                        time.sleep(0.3)
+                                        send_keys("%{c}")
+                                        time.sleep(0.3)
+                                        send_keys("{ESC}")
+                                        time.sleep(0.5)
+                                    except Exception:
+                                        pass
+                except Exception as cleanup_err:
+                    logger.debug(f"Failed to clear leftover report windows: {cleanup_err}")
+
                 if recorder.is_active():
                     recorder.stop()
 
-                if current_batch_name and not import_failed:
+                # Dispatch Per-Batch Email
+                if current_batch_name:
                     try:
                         day_folder = datetime.now().strftime("%Y-%m-%d")
                         screenshot_folder = os.path.join(BASE_OUTPUT_DIR, day_folder, current_batch_name or process_name)
                         os.makedirs(screenshot_folder, exist_ok=True)
-                        
                         target_path = os.path.join(screenshot_folder, f"screenshot_{datetime.now().strftime('%H-%M-%S')}.png")
                         actual_saved_path = capture_screenshot(target_path) or target_path
 
                         table_rows = [
-                            ("Process Status", "SUCCESSFUL"),
+                            ("Process Status", "FAILED - DATA ERROR" if import_failed else "SUCCESSFUL"),
                             ("Process", process_name),
                             ("Date", current_json_date),
                             ("Client Value", current_client_value),
                             ("Execution Time", current_exec_time),
                         ]
-                        
+                        if import_failed:
+                            table_rows.append(("Error Details", failure_reason or "Tampered file rejected"))
+
                         send_batch_report_email(
                             smtp_config=smtp_config,
                             mail_config=mail_config,
                             table_rows=table_rows,
                             screenshot_path=actual_saved_path,
-                            default_subject=f"Import Batch Report - {process_name}",
+                            default_subject=f"Import Batch Report - {process_name} {'[FAILED]' if import_failed else ''}".strip(),
                         )
                     except Exception as e:
-                        logger.error(f"Failed to capture screenshot / send batch report email: {e}", exc_info=True)
+                        logger.error(f"Failed to send batch report email: {e}", exc_info=True)
 
-
+                    import_failed = False
+                    current_batch_name = None            
             # ============================================================
             # 8B. DYNAMIC EXPLICIT REPORT / EMAIL DISPATCH HANDLER
             # ============================================================
@@ -1314,7 +1417,73 @@ def handle_administration(main_window, process_config, global_config=None, proce
                 if recorder.is_active():
                     recorder.stop()
 
-                if current_batch_name and not import_failed:
+                # MUST BE WIN32 TO READ VB6 DIALOG TEXT
+                desktop = Desktop(backend="win32")
+
+                # Scan for lingering error dialogs using Win32
+                for win in desktop.windows():
+                    try:
+                        w_title = win.window_text()
+                        w_cls = win.class_name()
+                        if re.search(r"(?i).*(Cross|Information|Message|Confirmation|Notice|Alert|Error|Warning|Fatal|#32770).*", w_title) or w_cls in ["#32770", "ThunderRT6FormDC"]:
+                            if win.is_visible() and win.handle != main_window.handle:
+                                body_texts = [w_title]
+                                clean_report_text = ""
+
+                                for ctrl in win.descendants():
+                                    try:
+                                        t = ctrl.window_text().strip()
+                                        if t:
+                                            body_texts.append(t)
+                                        # Target the dedicated report viewer control directly
+                                        if ctrl.class_name() == "RichTextWndClass":
+                                            clean_report_text = t
+                                    except Exception:
+                                        pass
+                                full_popup_text = " ".join(body_texts).lower()
+
+                                if any(word in full_popup_text for word in ["error", "fatal", "warning", "fail", "invalid", "not found", "unsuccess", "mismatch"]):
+                                    logger.warning(f"Tampered file error caught during send_report: '{full_popup_text}'")
+                                    import_failed = True
+                                    overall_process_failed = True
+                                    
+                                    # Use clean RichTextWndClass text if available without the prefix
+                                    if clean_report_text:
+                                        failure_reason = clean_report_text.replace('\n', ' ').replace('\r', '').strip()
+                                    else:
+                                        failure_reason = win.window_text().strip()                                    
+                                   # WIN32 TARGETED CLOSE LINGERING WINDOW
+                                    logger.info("Attempting to forcefully close lingering white report window in send_report...")
+                                    w_title = win.window_text()
+                                    
+                                    # Strictly only kill it if it is a report window
+                                    if "report" in w_title.lower() and "estro" not in w_title.lower().strip()[:5]:
+                                        try:
+                                            win.set_focus()
+                                            time.sleep(0.2)
+                                            win.close() 
+                                            time.sleep(0.5)
+                                        except Exception:
+                                            pass
+
+                                        if win.exists():
+                                            try:
+                                                send_keys("%{F4}")
+                                                time.sleep(0.3)
+                                                send_keys("%{c}")
+                                                time.sleep(0.3)
+                                                send_keys("{ESC}")
+                                                time.sleep(0.5)
+                                            except Exception:
+                                                pass
+                                        
+                                    time.sleep(1.0)
+                                    break
+                    except Exception:
+                        continue
+
+                # Dispatch email with accurate failure/success table rows
+                if current_batch_name:
                     try:
                         day_folder = datetime.now().strftime("%Y-%m-%d")
                         screenshot_folder = os.path.join(BASE_OUTPUT_DIR, day_folder, current_batch_name or process_name)
@@ -1323,26 +1492,30 @@ def handle_administration(main_window, process_config, global_config=None, proce
                         target_path = os.path.join(screenshot_folder, f"screenshot_{datetime.now().strftime('%H-%M-%S')}.png")
                         actual_saved_path = capture_screenshot(target_path) or target_path
 
+                        # FIX: Removed overall_process_failed so per-file reporting is accurate
                         table_rows = [
-                            ("Process Status", "SUCCESSFUL"),
+                            ("Process Status", "FAILED - DATA ERROR" if import_failed else "SUCCESSFUL"),
                             ("Process", process_name),
                             ("Date", current_json_date),
                             ("Client Value", current_client_value),
                             ("Execution Time", current_exec_time),
                         ]
+                        if import_failed:
+                            table_rows.append(("Error Details", failure_reason or "Tampered file rejected"))
                         
                         send_batch_report_email(
                             smtp_config=smtp_config,
                             mail_config=mail_config,
                             table_rows=table_rows,
                             screenshot_path=actual_saved_path,
-                            default_subject=f"Import Batch Report - {process_name}",
+                            default_subject=f"Import Batch Report - {process_name} {'[FAILED]' if import_failed else ''}".strip(),
                         )
                         logger.info(f"Successfully transmitted report email for: {current_batch_name}")
-                        current_batch_name = None
                     except Exception as e:
-                        logger.error(f"Failed to capture screenshot / send batch report email: {e}", exc_info=True)            
+                        logger.error(f"Failed to capture screenshot / send batch report email: {e}", exc_info=True)
 
+                    current_batch_name = None
+                    import_failed = False     
             # ============================================================
             # 9. DYNAMIC CONTAINER CLOSE ACTION
             # ============================================================
@@ -1414,3 +1587,16 @@ def handle_administration(main_window, process_config, global_config=None, proce
     finally:
         if recorder.is_active():
             recorder.stop()
+
+    # Latch: True if ANY file failed during the run
+    # Latch: True if ANY file failed OR if folders were skipped
+    final_verdict = bool(overall_process_failed or import_failed or skipped_step_count > 0)
+    if skipped_step_count > 0 and not failure_reason:
+       failure_reason = f"{skipped_step_count} step(s) were skipped due to missing folders"
+
+    if final_verdict:
+       logger.error(f"🛑 Run completed with errors (final_verdict=FAILED). Reason: {failure_reason or 'Tampered data detected'}")
+    else:
+       logger.info("✅ Run completed without any recorded failures.")
+
+    return (final_verdict, failure_reason or "Application Data Error")        

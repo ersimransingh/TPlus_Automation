@@ -3,6 +3,7 @@ import json
 import time
 from pywinauto import Application
 from pywinauto.keyboard import send_keys
+from date_engine import to_web
 
 def load_config_profile(filename):
     """Safely handles reading specific JSON profile data maps from the root workspace."""
@@ -69,8 +70,9 @@ def execute_report_setup_form():
         for index, task in enumerate(setup_tasks, start=1):
             module_id = str(task.get("module_id") or task.get("MODULE_ID", "")).strip()
             report_id = str(task.get("report_id") or task.get("REPORT_ID", "")).strip()
-            date_from = str(task.get("business_date_from") or task.get("BUSINESS_DATE_FROM", "")).strip()
-            date_to = str(task.get("business_date_to") or task.get("BUSINESS_DATE_TO", "")).strip()
+            #date_engine
+            date_from = to_web(task.get("business_date_from") or task.get("BUSINESS_DATE_FROM", "t"))
+            date_to = to_web(task.get("business_date_to") or task.get("BUSINESS_DATE_TO", "t"))
             report_type_target = str(task.get("report_type") or task.get("REPORT_TYPE", "Incremental")).strip()
             
             print(f"\n--- [Setup Task {index}/{total_tasks}] Processing Module: {module_id} | Report: {report_id} ---")
