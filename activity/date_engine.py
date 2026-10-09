@@ -61,8 +61,8 @@ def resolve_date_details(date_token):
                 raw = json.load(f)
                 holiday_cfg = raw.get("holiday_settings", raw)
 
-            skip_weekends = holiday_cfg.get("skip_weekends", True)
-            weekend_days = [d.strip().lower() for d in holiday_cfg.get("weekend_days", ["sunday"])]
+            skip_weekends = holiday_cfg.get("skip_weekends", False)
+            weekend_days = [d.strip().lower() for d in holiday_cfg.get("weekend_days", [])]
 
             holiday_dates = set()
             for h in holiday_cfg.get("holidays", []):

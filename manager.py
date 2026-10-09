@@ -705,11 +705,11 @@ def is_non_working_day():
             log_message(f"⚠️ Warning reading holidays config: {e}", "WARNING")
             holiday_cfg = {}
 
-    # 1. Check Weekend (defaults to Sunday only, as defined in holidays.json)
-    skip_weekends = holiday_cfg.get("skip_weekends", True)
-    weekend_days = [d.strip().lower() for d in holiday_cfg.get("weekend_days", ["sunday"])]
+    # 1. Check Weekend (Only active if explicitly defined in holidays.json)
+    skip_weekends = holiday_cfg.get("skip_weekends", False)
+    weekend_days = [d.strip().lower() for d in holiday_cfg.get("weekend_days", [])]
     if skip_weekends and now.strftime("%A").lower() in weekend_days:
-        return True, f"Weekend ({now.strftime('%A')})"
+       return True, f"Weekend ({now.strftime('%A')})"
 
     # 2. Check Holidays
     holidays = holiday_cfg.get("holidays", [])
