@@ -1007,6 +1007,7 @@ def handle_administration(main_window, process_config, global_config=None, proce
 
                 logger.info(f"✓ Cleared total of {dialogs_cleared} pop-up dialog window(s).")
 
+                
                 # WIN32 AGGRESSIVE SWEEP AND DESTROY POST-OK
                 logger.info("Sweeping strictly for secondary white report windows post-OK...")
                 time.sleep(1.5)
@@ -1017,10 +1018,29 @@ def handle_administration(main_window, process_config, global_config=None, proce
                         if leftover_win.process_id() == cached_app_pid:
                             w_title = leftover_win.window_text()
                             
-                            # STRICT FILTER: Only destroy windows that contain "Report" in the title
-                            if "report" in w_title.lower() and "estro" not in w_title.lower().strip()[:5]:
-                                logger.info(f"Target locked. Destroying specific report window: {w_title}")
+                            # UNIVERSAL GUARD: Protect main window for BOTH Estro and Cross
+                            is_main_app = (leftover_win.handle == main_window.handle) or any(
+                                app in w_title.lower().strip()[:6] for app in ["estro", "cross"]
+                            )
+
+                            if "report" in w_title.lower() and not is_main_app:
+                                logger.info(f"Target locked. Inspecting report window before destroy: {w_title}")
                                 
+                                # 1. Extract report error details before destroying the window
+                                try:
+                                    for ctrl in leftover_win.descendants():
+                                        if ctrl.class_name() == "RichTextWndClass":
+                                            rt_text = ctrl.window_text().strip()
+                                            if rt_text:
+                                                failure_reason = rt_text.replace('\n', ' ').replace('\r', '').strip()
+                                                import_failed = True
+                                                overall_process_failed = True
+                                                logger.info(f"Extracted rich report text: '{failure_reason[:80]}...'")
+                                                break
+                                except Exception as extract_err:
+                                    logger.debug(f"Could not read RichText from report window: {extract_err}")
+
+                                # 2. Close and release window
                                 try:
                                     leftover_win.set_focus()
                                     time.sleep(0.2)
@@ -1041,7 +1061,6 @@ def handle_administration(main_window, process_config, global_config=None, proce
                                         pass
                 except Exception as cleanup_err:
                     logger.debug(f"Failed to clear leftover report windows: {cleanup_err}")
-
                 if recorder.is_active():
                     recorder.stop()
 
