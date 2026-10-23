@@ -189,17 +189,14 @@ def load_activity_master():
         target_path = os.path.join(base_dir, fname)
         if os.path.exists(target_path):
             with open(target_path, "r", encoding="utf-8") as f:
-                return json.load(f)
+                raw_data = json.load(f)
+            return resolve_all_dynamic_tokens(raw_data)
 
     parent_path = os.path.join(os.path.dirname(base_dir), "activity.json")
     if os.path.exists(parent_path):
-        with open(target_path, "r", encoding="utf-8") as f:
+        with open(parent_path, "r", encoding="utf-8") as f:
             raw_data = json.load(f)
-        
-        # Apply dynamic token replacement across ALL fields (dp_rta_id, main_path, file patterns)
-        resolved_data = resolve_all_dynamic_tokens(raw_data)
-        return resolved_data
-
+        return resolve_all_dynamic_tokens(raw_data)
     print("❌ Critical Error: Could not locate 'activity.json' in execution path.")
     sys.exit(1)
 
@@ -323,19 +320,8 @@ def load_task_toggles():
     standalone_profile = copy.deepcopy(active_profile)
 
     setup_list = standalone_profile.get("setup_tasks") or standalone_profile.get("SETUP_TASKS", [])
-    for setup_item in setup_list:
-        date_from = setup_item.get("business_date_from") or setup_item.get("BUSINESS_DATE_FROM", "t")
-        date_to = setup_item.get("business_date_to") or setup_item.get("BUSINESS_DATE_TO", "t")
-        setup_item["business_date_from"] = parse_standalone_date(date_from)
-        setup_item["business_date_to"] = parse_standalone_date(date_to)
-
     download_list = standalone_profile.get("download_task") or standalone_profile.get("TASKS", [])
-    for download_item in download_list:
-        date_from = download_item.get("business_date_from") or download_item.get("BUSINESS_DATE_FROM", "t")
-        date_to = download_item.get("business_date_to") or download_item.get("BUSINESS_DATE_TO", "t")
-        download_item["business_date_from"] = parse_standalone_date(date_from)
-        download_item["business_date_to"] = parse_standalone_date(date_to)
-
+    
     run_setup_val = bool(standalone_profile.get("cdsl_setup", standalone_profile.get("run_report_setup", False)))
     run_download_val = bool(standalone_profile.get("cdsl_download", standalone_profile.get("run_report_download", True)))
 

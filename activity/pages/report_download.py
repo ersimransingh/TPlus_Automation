@@ -84,26 +84,26 @@ from datetime import datetime, date, timedelta
 
 # Import date helpers directly from the central date engine
 try:
-    from date_engine import to_date_components, to_folder, to_yyyymmdd
+    from date_engine import to_picker, to_folder, to_yyyymmdd
 except ImportError:
-    from activity.date_engine import to_date_components, to_folder, to_yyyymmdd
+    from activity.date_engine import to_picker, to_folder, to_yyyymmdd
 
 def get_date_components(date_str):
-    """Parses date token into ('07', 'Oct', '2026') via date_engine."""
-    override = os.environ.get("OVERRIDE_TARGET_TOKEN")
-    token = override if override else (date_str or "t")
-    return to_date_components(token)
+    """Parses date token into numeric ('07', '10', '2026') via date_engine."""
+    override = os.environ.get("OVERRIDE_TARGET_TOKEN", "").strip()
+    token = override if override else (str(date_str).strip() or "t")
+    return to_picker(token)
 
 def resolve_date_string(date_str):
     """Standardizes target folder format to '07Oct2026' via date_engine."""
-    override = os.environ.get("OVERRIDE_TARGET_TOKEN")
-    token = override if override else (date_str or "t")
+    override = os.environ.get("OVERRIDE_TARGET_TOKEN", "").strip()
+    token = override if override else (str(date_str).strip() or "t")
     return to_folder(token)
 
 def resolve_date_yyyymmdd(date_str):
     """Resolves date token to '20261007' for OCR searches via date_engine."""
-    override = os.environ.get("OVERRIDE_TARGET_TOKEN")
-    token = override if override else (date_str or "t")
+    override = os.environ.get("OVERRIDE_TARGET_TOKEN", "").strip()
+    token = override if override else (str(date_str).strip() or "t")
     return to_yyyymmdd(token)
 
 def send_notification_email(email_settings, subject, body, attachments=None):
@@ -443,52 +443,14 @@ def matches_pattern_strict(filename, pattern_config, date_token=""):
 
 def format_date_folder_name(date_token):
     """
-    Converts ANY date input into 'ddMonYYYY' format with capitalized months 
-    (e.g., '06Aug2026', '01Jun2026', '03Jul2026', '05Mar2026', '01Dec2026').
+    Delegates folder name formatting to date_engine so holidays.json is respected.
+    Outputs 'ddMonYYYY' (e.g., '03Oct2026').
     """
     if not date_token:
         return ""
-
-    raw = str(date_token).strip()
-    target_dt = None
-
-    # 1. Handle pure digits YYYYMMDD (e.g., '20260806')
-    if raw.isdigit() and len(raw) == 8:
-        try:
-            target_dt = datetime.strptime(raw, "%Y%m%d")
-        except ValueError:
-            pass
-
-    # 2. Handle Relative Date Expressions (e.g., 't-1', 't-4')
-    elif "t" in raw.lower() and ("-" in raw or "+" in raw):
-        try:
-            match = re.search(r'[-+]\s*\d+', raw.lower())
-            if match:
-                offset = int(match.group().replace(" ", ""))
-                target_dt = datetime.now() + timedelta(days=offset)
-        except Exception:
-            pass
-
-    # 3. Handle Formatted Date Strings (e.g., '06-Aug-2026', '2026-08-06', '06/08/2026')
-    if not target_dt:
-        for fmt in ("%d-%b-%Y", "%Y-%m-%d", "%d/%m/%Y", "%Y/%m/%d", "%d%b%Y"):
-            try:
-                target_dt = datetime.strptime(raw, fmt)
-                break
-            except ValueError:
-                continue
-
-    # Format output specifically with mixed-case Month (dd + Mon + YYYY)
-    if target_dt:
-        day_str = target_dt.strftime("%d")          # e.g., '06'
-        month_str = target_dt.strftime("%b").capitalize()  # e.g., 'Aug', 'Jun', 'Jul', 'Mar', 'Dec'
-        year_str = target_dt.strftime("%Y")         # e.g., '2026'
-        
-        folder_name = f"{day_str}{month_str}{year_str}"
-        print(f"📅 [FOLDER RESOLUTION] Converted date token '{date_token}' -> Folder: '{folder_name}'")
-        return folder_name
-
-    return ""
+    folder_name = to_folder(str(date_token).strip())
+    print(f"📅 [FOLDER RESOLUTION] Converted date token '{date_token}' -> Folder: '{folder_name}'")
+    return folder_name
 
 def extract_and_copy_zip_files(source_directory, destination_directory, pattern_config=None, date_token=""):
     """
@@ -624,13 +586,24 @@ def process_single_report_task(app, report_win, task, task_index, total_tasks, e
     report_id = str(task.get("report_id") or task.get("REPORT_ID", "")).strip()
     
     # Priority: Use manager's holiday-adjusted token if provided
-    override_token = os.environ.get("OVERRIDE_TARGET_TOKEN")
-    raw_from = str(task.get("business_date_from") or task.get("BUSINESS_DATE_FROM", "")).strip()
-    raw_to = str(task.get("business_date_to") or task.get("BUSINESS_DATE_TO", "")).strip()
+    override_token = os.environ.get("OVERRIDE_TARGET_TOKEN", "").strip()
+    raw_from = str(
+        task.get("business_date_from") or 
+        task.get("BUSINESS_DATE_FROM") or 
+        global_config.get("business_date_from") or 
+        global_config.get("BUSINESS_DATE_FROM") or 
+        "t-1"
+    ).strip()
+    raw_to = str(
+        task.get("business_date_to") or 
+        task.get("BUSINESS_DATE_TO") or 
+        global_config.get("business_date_to") or 
+        global_config.get("BUSINESS_DATE_TO") or 
+        "t-1"
+    ).strip()
 
     date_from_raw = override_token if override_token else raw_from
-    date_to_raw = override_token if override_token else raw_to
-    
+    date_to_raw = override_token if override_token else raw_to    
     # READ RAW PATTERN FROM TASK
     raw_pattern = task.get("target_file_pattern") or task.get("TARGET_FILE_PATTERN", [])
 
@@ -665,15 +638,48 @@ def process_single_report_task(app, report_win, task, task_index, total_tasks, e
         send_keys(report_id, with_spaces=True)
 
     def set_control_date(pane, day_val, month_val, year_val):
-        pane.click_input()
-        time.sleep(0.15)
-        send_keys("{LEFT 3}")
+        try:
+            pane.set_focus()
+        except Exception:
+            pass
         time.sleep(0.1)
-        d_num = f"{int(day_val):02d}"
-        m_num = f"{int(month_val):02d}"
-        # Send raw 8 digits straight without {RIGHT} to prevent auto-advancing skips
-        send_keys(f"{d_num}{m_num}{year_val}")
+
+        # 1. Click specifically on the left edge (coords=(15, 12)) where the Day digits sit
+        pane.click_input(coords=(15, 12))
         time.sleep(0.2)
+
+        # 2. Guarantee the cursor jumps to the first segment (Day)
+        send_keys("{HOME}")
+        time.sleep(0.1)
+
+        month_map = {
+            "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+            "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12
+        }
+        m_clean = str(month_val).strip().lower()
+        m_int = month_map[m_clean[:3]] if m_clean[:3] in month_map else int(m_clean)
+
+        d_num = f"{int(day_val):02d}"
+        m_num = f"{m_int:02d}"
+        y_num = str(year_val).strip()
+
+        print(f"📅 Typing resolved date into CDSL control: {d_num}-{m_num}-{y_num}")
+
+        # Step A: Type 2-digit day
+        send_keys(d_num)
+        time.sleep(0.15)
+
+        # Step B: Move right to Month segment and type 2-digit month
+        send_keys("{RIGHT}")
+        time.sleep(0.1)
+        send_keys(m_num)
+        time.sleep(0.15)
+
+        # Step C: Move right to Year segment and type 4-digit year
+        send_keys("{RIGHT}")
+        time.sleep(0.1)
+        send_keys(y_num)
+        time.sleep(0.25)
 
     # 3. Fill From Date
     if day_from and month_from and year_from:

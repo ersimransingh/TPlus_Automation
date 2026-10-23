@@ -3,16 +3,29 @@ import os
 import re
 import json
 from datetime import datetime, timedelta
+import sys
 
 def get_holiday_path():
-    """Locates holidays.json across root and activity directory paths."""
+    """Locates holidays.json across root and activity directory paths in dev and PyInstaller."""
     search_files = ["holidays.json", "holiday.json", "Holidays.json"]
-    base_dirs = [
+    base_dirs = []
+
+    # 1. Look relative to the compiled EXE location if frozen
+    if getattr(sys, 'frozen', False):
+        exe_dir = os.path.dirname(sys.executable)
+        base_dirs.extend([
+            exe_dir,
+            os.path.abspath(os.path.join(exe_dir, "..")),
+        ])
+
+    # 2. Look relative to script directory and working directory
+    base_dirs.extend([
         os.path.abspath(os.path.join(os.path.dirname(__file__), "..")),
         os.path.dirname(os.path.abspath(__file__)),
         os.getcwd(),
         os.path.abspath(os.path.join(os.getcwd(), ".."))
-    ]
+    ])
+
     for b in base_dirs:
         for fname in search_files:
             cand = os.path.join(b, fname)
@@ -44,9 +57,10 @@ def resolve_date_details(date_token):
         match = re.search(r'[-+]\s*\d+', normalized)
         offset_days = int(match.group().replace(" ", "")) if match else 0
     else:
-        for fmt in ("%d-%b-%Y", "%Y%m%d", "%Y-%m-%d", "%d/%m/%Y", "%d%b%Y"):
+        raw_clean = str(date_token).strip()
+        for fmt in ("%d-%b-%Y", "%Y%m%d", "%Y-%m-%d", "%d/%m/%Y", "%d%b%Y", "%d-%m-%Y"):
             try:
-                return datetime.strptime(normalized, fmt).date(), []
+                return datetime.strptime(raw_clean, fmt).date(), []
             except ValueError:
                 continue
         offset_days = 0
@@ -102,9 +116,9 @@ def to_web(token):
     return resolve_date(token).strftime("%d-%b-%Y")
 
 def to_date_components(token):
-    """Returns ('06', 'Oct', '2026') for CDSL Download panes."""
+    """Returns ('06', '10', '2026') for CDSL Download panes so int() never crashes."""
     d = resolve_date(token)
-    return d.strftime("%d"), d.strftime("%b").capitalize(), d.strftime("%Y")
+    return d.strftime("%d"), d.strftime("%m"), d.strftime("%Y")
 
 def to_folder(token):
     """Returns '06Oct2026' for target directories."""

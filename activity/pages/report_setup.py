@@ -71,10 +71,14 @@ def execute_report_setup_form():
             module_id = str(task.get("module_id") or task.get("MODULE_ID", "")).strip()
             report_id = str(task.get("report_id") or task.get("REPORT_ID", "")).strip()
             #date_engine
-            date_from = to_web(task.get("business_date_from") or task.get("BUSINESS_DATE_FROM", "t"))
-            date_to = to_web(task.get("business_date_to") or task.get("BUSINESS_DATE_TO", "t"))
+            override_token = os.environ.get("OVERRIDE_TARGET_TOKEN", "").strip()
+            raw_from = task.get("business_date_from") or task.get("BUSINESS_DATE_FROM", "t")
+            raw_to = task.get("business_date_to") or task.get("BUSINESS_DATE_TO", "t")
+
+            date_from = to_web(override_token if override_token else raw_from)
+            date_to = to_web(override_token if override_token else raw_to)
             report_type_target = str(task.get("report_type") or task.get("REPORT_TYPE", "Incremental")).strip()
-            
+                        
             print(f"\n--- [Setup Task {index}/{total_tasks}] Processing Module: {module_id} | Report: {report_id} ---")
 
             # Ensure document area is focused for each task iteration
@@ -107,8 +111,9 @@ def execute_report_setup_form():
             time.sleep(0.2)
             send_keys("^a{BACKSPACE}")
             time.sleep(0.1)
-            if date_from:
-                send_keys(date_from, with_spaces=True)
+            send_keys(date_from, with_spaces=True)
+            time.sleep(0.2)
+            send_keys("{TAB}")
             time.sleep(0.2)
 
             # --- Fill Business Date To ---
@@ -117,10 +122,11 @@ def execute_report_setup_form():
             time.sleep(0.2)
             send_keys("^a{BACKSPACE}")
             time.sleep(0.1)
-            if date_to:
-                send_keys(date_to, with_spaces=True)
-            time.sleep(0.4)
-
+            send_keys(date_to, with_spaces=True)
+            time.sleep(0.2)
+            send_keys("{TAB}")
+            time.sleep(0.3)
+            
             # --- Trigger Setup Button ---
             setup_btn = web_document.child_window(title="Setup", auto_id="btnReportSetup", control_type="Button")
             if not setup_btn.exists(timeout=3):
