@@ -381,7 +381,7 @@ def click_grid_download_button(*containers, auto_id="cmdDownload", timeout=5):
     print("⚠️ Could not locate the 'cmdDownload' button in any candidate window.")
     return False
 
-def handle_post_download_dialogs(app, overwrite_wait=4, complete_wait=8):
+def handle_post_download_dialogs(app, overwrite_wait=4, complete_wait=90):
     dialog_screenshots = []
     try:
         popup = app.top_window()
@@ -824,6 +824,10 @@ def process_single_report_task(app, report_win, task, task_index, total_tasks, e
 
     print(f"\n🚚 [FILE SYNC] Transferring files for Date Token '{date_yyyymmdd}' from '{process_source_path}' -> '{master_destination_path}'")
     
+    # Allow CDAS to finish writing and release file locks on disk
+    print("⏳ Waiting 5 seconds for disk write stabilization...")
+    time.sleep(5.0)
+
     # Run sync engine passing the strict Date Token ('20260803')
     extract_and_copy_zip_files(
         process_source_path, 
@@ -882,7 +886,8 @@ def process_single_report_task(app, report_win, task, task_index, total_tasks, e
     except Exception:
         pass
 
-    return True
+    # Return the actual verification result (False if missing patterns, True if all matched)
+    return success
 
 def execute_report_download_form():
     print("\n--- Initializing Multi-Task Report Generation Pipeline ---")
@@ -930,8 +935,12 @@ def execute_report_download_form():
         report_win.set_focus()
         time.sleep(0.5)
 
+        all_tasks_passed = True
+
         for index, single_task in enumerate(combined_tasks, start=1):
-            process_single_report_task(app, report_win, single_task, index, total_tasks, email_settings, global_config)
+            task_status = process_single_report_task(app, report_win, single_task, index, total_tasks, email_settings, global_config)
+            if not task_status:
+                all_tasks_passed = False
             time.sleep(2.0)
 
         try:
@@ -944,11 +953,16 @@ def execute_report_download_form():
             time.sleep(0.5)
             send_keys("http://cdslweb.cdslindia.com/RELIDCDASWEBCORE/Home{ENTER}", with_spaces=True)
             print("✓ Redirection completed successfully!")
-            return True
         except Exception as browser_err:
             print(f"  Could not redirect browser session: {browser_err}")
-            return False
 
+        # If any file pattern audit failed, exit with code 1 so manager triggers a retry
+        if not all_tasks_passed:
+            print("🛑 [AUDIT FAILURE] Missing required files in destination! Terminating with exit code 1 to force retry...")
+            sys.exit(1)
+
+        return True
+    
     except FileNotFoundError as fnf:
         print(f"Setup Conflict Error: {fnf}")
     except Exception as err:

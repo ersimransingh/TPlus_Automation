@@ -493,7 +493,7 @@ def send_manager_status_email(process_name, status, attempts_used, max_retries, 
                         task_p_name = task.get("process_name") or task.get("Process_name")
                         if str(task_p_name).strip().lower() == str(process_name).strip().lower():
                             task_email_cfg = task.get("email_settings") or task.get("EMAIL_SETTINGS", {})
-                            to_email = task.get("reporting_email") or task_email_cfg.get("reporting_email") or task.get("to")
+                            to_email = task.get("reporting_email") or  task_email_cfg.get("reporting_email") or task_email_cfg.get("to") or task.get("to")
                             break
                     
                     # Fallback to top-level scheduler email_settings if not specified inside task
@@ -553,6 +553,15 @@ def send_manager_status_email(process_name, status, attempts_used, max_retries, 
 
         subject = f"{system_title} Report: {process_name} - {status.upper()}"
 
+        skip_row_html = ""
+        if skip_reason:
+            skip_row_html = f"""
+                <tr>
+                  <td style="padding: 8px 12px; font-weight: bold; background: #f8f9fa; border: 1px solid #dee2e6;">Reason & Action</td>
+                  <td style="padding: 8px 12px; border: 1px solid #dee2e6; color: #b91c1c; font-weight: bold;">{skip_reason}</td>
+                </tr>
+            """
+
         html_body = f"""
         <html>
           <body style="font-family: Arial, sans-serif; color: #333; line-height: 1.5;">
@@ -570,6 +579,7 @@ def send_manager_status_email(process_name, status, attempts_used, max_retries, 
                   <td style="padding: 8px 12px; font-weight: bold; background: #f8f9fa; border: 1px solid #dee2e6;">Job Automation State</td>
                   <td style="padding: 8px 12px; border: 1px solid #dee2e6; color: {status_color}; font-weight: bold;">{status.upper()}</td>
                 </tr>
+                {skip_row_html}
                 <tr>
                   <td style="padding: 8px 12px; font-weight: bold; background: #f8f9fa; border: 1px solid #dee2e6;">Attempts Executed</td>
                   <td style="padding: 8px 12px; border: 1px solid #dee2e6;">{attempts_used} / {max_retries}</td>
@@ -854,8 +864,30 @@ def trigger_existing_script(process_name):
     if not check_remote_status(task_config):
         log_message(f"🛑 Terminating run execution chain for {process_name} due to invalid dependency state.", "WARNING")
         write_summary_log(process_name, "unsuccess")
-        return 
 
+        # Dynamically extract prerequisite task names from scheduler configuration
+        raw_deps = task_config.get("dependency") or task_config.get("DEPENDENCY", [])
+        dep_list = [raw_deps] if isinstance(raw_deps, dict) else (raw_deps if isinstance(raw_deps, list) else [])
+        dep_names = ", ".join([str(d.get("process_name") or d.get("Process_name")) for d in dep_list if isinstance(d, dict)]) or "Prerequisite Workflow"
+
+        # Fully generalized notification details
+        skip_explanation = (
+            f"Prerequisite workflow '{dep_names}' was not marked as successful in the dependency log. "
+            f"Execution of '{process_name}' has been skipped to prevent processing inconsistency."
+        )
+
+        # Dispatch status report before aborting execution
+        send_manager_status_email(
+            process_name=process_name,
+            status="SKIPPED - DEPENDENCY NOT MET",
+            attempts_used=0,
+            max_retries=configured_retries,
+            duration_str="0s",
+            video_path="N/A (Skipped)",
+            skip_reason=skip_explanation
+        )
+        return
+    
     # --- STRICT DYNAMIC APP DETECTION (EXCLUSIVELY VIA APP_PATH) ---
     is_cross_automation = False
     try:
@@ -942,18 +974,23 @@ def trigger_existing_script(process_name):
             if result.stdout:
                 log_message(f"Script stdout:\n{result.stdout.strip()}")
 
-            # --- READ THE REAL OUTCOME FROM LOG.JSON ---
+            # --- STRICT OUTCOME EVALUATION ---
             act_entry = latest_result_entry(process_name)
-            if act_entry is not None:
+            today_str = datetime.now().strftime("%d-%b-%Y")
+
+            # Validate log.json entry only if it was recorded today
+            if act_entry is not None and act_entry.get("date") == today_str:
                 act_status = str(act_entry.get("Status") or act_entry.get("status") or "").strip().lower()
-                is_success = (act_status == "success")
+                is_success = (result.returncode == 0 and act_status == "success")
             else:
+                # Require exit code 0 AND ensure no error/failure strings are in stdout/stderr
                 is_success = (
                     result.returncode == 0 and 
+                    "❌ FAILURE" not in combined_output and
                     "❌ Automation process terminated with errors" not in combined_output and
-                    "UNSUCCESS" not in combined_output
+                    "UNSUCCESS" not in combined_output and
+                    "[AUDIT FAILURE]" not in combined_output
                 )
-
             
             if is_success:
                 duration_delta = str(datetime.now() - start_total_time)
