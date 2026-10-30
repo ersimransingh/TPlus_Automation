@@ -546,6 +546,22 @@ def run_universal_automation():
         logger.info("📈 [ROUTER] Signature Matched: TRADEPLUS AUTOMATION PIPELINE")
         run_tradeplus_pipeline(master_config)
 
+    # --- BRANCH 4: NSDL DPM PLAYWRIGHT PIPELINE ---
+    elif process_data.get("nsdl_download", False):
+        logger.info(f"🌐 [ROUTER] Signature Matched: NSDL DPM PIPELINE for '{matched_key}'")
+        
+        from nsdl_runner import execute_nsdl_process
+
+        task_ok, failure_reason = execute_nsdl_process(matched_key, process_data, master_config)
+
+        # Write result to schedule_log/log.json so manager.py reads success/unsuccess
+        write_activity_result(matched_key, ok=task_ok, reason=failure_reason)
+
+        if not task_ok:
+            logger.error(f"Automation process terminated with errors: {failure_reason}")
+            sys.exit(1)    
+     
+
     else:
         logger.error(f"❌ Unknown workflow JSON structure for process '{process_name_arg}' in {target_config_path}")
         raise ValueError(f"Unknown workflow JSON structure for process '{process_name_arg}' in {target_config_path}")

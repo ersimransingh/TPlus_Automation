@@ -1,0 +1,102 @@
+{
+  "global_app_settings": {
+    "url": "http://172.21.29.51/nsdldpm/",
+    "user_id": "maker",
+    "app_password_enc": "Msbpl@456",
+    "main_download_path": "C:\\NSDLFILES",
+    "file_explorer_visibility": true,
+    "poll_interval_seconds": 300,
+    "refresh_limit": 2
+  },
+  "locators": {
+    "user_id_xpath": "//input[@name='txtUserID']",
+    "password_xpath": "//input[@name='txtPassword']",
+    "login_btn_xpath": "//input[@name='btnLogin']",
+    "logout_btn_xpath":"//a[text()='Logout']",
+    "uploads_menu_xpath": "//*[contains(normalize-space(.), 'ploads/Downloads')]",
+    "downloads_menu_xpath": "//*[contains(normalize-space(.), 'nloads')]",
+    "master_menu_xpath": "//*[contains(normalize-space(.), 'aster')]",
+    "client_master_xpath": "//*[contains(normalize-space(.), 'ient Master')]",
+    "security_master_xpath": "//*[contains(normalize-space(.), 'ecurity Master(ISIN)')]",
+    "sot_xpath": "(//b[text()='ransaction'])[2]",
+    "soh_xpath": "//b[text()='olding']",
+    "date_from_xpath": "//input[@id='ctl00_RightContentPlaceHolder_txtStmtDateFrm']",
+    "date_to_xpath": "//input[@id='ctl00_RightContentPlaceHolder_txtStmtDateTo']",
+    "isin_date_xpath": "//input[@type='text']",
+    "soh_date_xpath": "(//input[@type='text'])[1]",
+    "incremental_label_xpath": "//label[text()='Incremental']",
+    "full_label_xpath": "//label[text()='Full']",
+    "submit_btn_xpath": "//input[@value='Submit']",
+    "request_id_xpath": "(//input[@type='text'])[1]",
+    "table_row_xpath": "//tr[@class='RepeaterRowStyle']",
+    "download_link_xpath": "//a[text()='Click here to download']",
+    "search_btn_xpath": "//input[@value='Search']",
+    "up_download_two": "//a[text()='ploads/Downloads']",
+    "download_or_upload_option_two": "//a[contains(.,'Download / Upload')]",
+    "download_option_two":"//a[text()='nload']",
+    "download_status_xpath": "(//b[text()='tatus'])[4]",
+    "download_sub_xpath": "//b[text()='Do']"
+  },
+  "Process_01": {
+    "nsdl_download": true,
+    "module_name": "Client Master",
+    "report_type": "Full",
+    "business_date_from": "t-1",
+    "business_date_to": "t-1",
+    "poll_interval_seconds":10,
+    "refresh_limit": 1,
+    "main_path": "C:\\NSDLFILES",
+    "email_notification": {
+      "enabled": true,
+      "recipients": ["jatingori124@gmail.com"]
+    }
+  },
+  "Process_02": {
+    "nsdl_download": true,
+    "module_name": "ISIN Master",
+    "report_type": "Incremental",
+    "business_date": "t-1",
+    "poll_interval_seconds":10,
+    "refresh_limit": 1,
+    "main_path": "C:\\NSDLFILES",
+    "email_notification": {
+      "enabled": true,
+      "recipients": ["jatingori124@gmail.com"]
+    }
+  },
+  "Process_03": {
+    "nsdl_download": true,
+    "module_name": "Statement of Transactions",
+    "report_type": "Full",
+    "business_date_from": "t-1",
+    "business_date_to": "t-1",
+    "poll_interval_seconds": 180,
+    "refresh_limit": 5,
+    "main_path": "C:\\NSDLFILES",
+    "email_notification": {
+      "enabled": true,
+      "recipients": ["jatingori124@gmail.com"]
+    }
+  },
+  "Process_04": {
+    "nsdl_download": true,
+    "module_name": "Statement of Holding",
+    "report_type": "Full",
+    "business_date": "t-1",
+    "poll_interval_seconds":10,
+    "refresh_limit": 1,
+    "main_path": "C:\\NSDLFILES",
+    "email_notification": {
+      "enabled": true,
+      "recipients": ["jatingori124@gmail.com"]
+    }
+  },
+  "email_settings": {
+    "host": "smtp.gmail.com",
+    "port": 587,
+    "use_tls": true,
+    "username": "preston75@zohomail.in",
+    "password_enc": "000",
+    "from_email": "jatingori124@gmail.com"
+  }
+}
