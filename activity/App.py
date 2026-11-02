@@ -18,6 +18,7 @@ import pytesseract
 from pywinauto import Application
 from pywinauto.keyboard import send_keys
 from date_engine import to_web
+from proc_utils import detached_dll_search
 
 from pages.report_download import execute_report_download_form
 from pages.report_setup import execute_report_setup_form 
@@ -468,7 +469,8 @@ def run_automation_flow(is_retry=False):
         time.sleep(1)
         try: 
             print(f"🚀 Launching main application frame: {app_path}")
-            subprocess.Popen(app_path)
+            with detached_dll_search():
+                subprocess.Popen(app_path)
             time.sleep(5.0)
         except Exception: return False
     
