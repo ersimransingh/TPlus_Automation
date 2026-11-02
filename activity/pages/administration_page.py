@@ -1077,356 +1077,281 @@ def handle_administration(main_window, process_config, global_config=None, proce
             elif action == "wait_for_table":
                 logger.info(f"Executing Table Loading Verification Step: {desc}")
                 try:
-                    logger.info("Waiting dynamically for data grid to populate (bypassing 'Not Responding' UI freezes)...")
-                    
-                    max_timeout = step.get('timeout', 300) 
-                    start_time = time.time()
-                    table_ready = False
-                    
-                    while (time.time() - start_time) < max_timeout:
-                        try:
-                            import_window = _get_target_window(step)
-                            
-                            if auto_id:
-                                table_grid = import_window.child_window(auto_id=str(auto_id), control_type=ctrl_type)
-                            else:
-                                grid_cls = step.get('class_name', 'MSHFlexGridWndClass')
-                                table_grid = import_window.child_window(class_name=grid_cls, control_type=ctrl_type, found_index=0)
-
-                            # RESTORED: Native strict check. 
-                            # If app is frozen/processing, this will purposefully fail and trigger the 'except' block
-                            table_grid.wait('exists', timeout=2)
-                            table_grid.wait('ready', timeout=2)
-                            
-                            # If it gets here without throwing an error, the thread is genuinely unlocked
-                            table_ready = True
-                            break
-                        except Exception:
-                            # Safely swallow TimeoutError and ElementNotFoundError while app processes
-                            pass
-                            
-                        time.sleep(2.0)
-                        
-                    if not table_ready:
-                        raise TimeoutError(f"Table did not load after {max_timeout} seconds.")
-
-                    grid_timeout = step.get('timeout', 300)
-
-                    # A result dialog (e.g. 'File Imported') can sit in front of the grid with
-                    # the app-name itself as its title. Detect it up front by enumerating the
-                    # app's windows (skipping the main frame) and defer straight to the
-                    # configured click_ok step instead of burning the full grid timeout.
-                    blocker_pre = None
-                    try:
-                        for w in Desktop(backend="uia").windows(process=cached_app_pid, top_level_only=True) if cached_app_pid else []:
-                            t = str(w.window_text()).strip()
-                            if (t and t != main_frame_title
-                                    and re.search(r"(?i).*(cross|information|imported|confirmation|notice|message|error|warning|fatal).*", t)):
-                                blocker_pre = t
-                                break
-                    except Exception:
-                        pass
-
-                    if blocker_pre:
-                        logger.warning(f"Active result dialog '{blocker_pre}' detected before grid wait; skipping grid verification and deferring to the dialog step.")
-                    else:
-                        logger.info(f"Waiting for data grid table initialization (timeout: {grid_timeout}s)...")
-                        table_grid.wait('exists', timeout=grid_timeout)
-                        table_grid.wait('ready', timeout=grid_timeout)
-                        time.sleep(1.5)
-                        logger.info("Data table successfully loaded and populated with imported values.")
-                except Exception as e:
-                    logger.error(f"Failed while waiting for processing table to display records: {e}", exc_info=True)
-                    if not _is_process_alive(cached_app_pid):
-                        logger.critical(
-                            f"Target application process (PID {cached_app_pid}) is no longer running; "
-                            f"it terminated before or during the grid verification wait."
-                        )
-                    _log_forensic_window_state("wait_for_table", cached_app_pid)
-                    # A result dialog can legitimately sit in front of the grid (e.g. 'File
-                    # Imported (Success)'); defer to the configured click_ok step instead
-                    # of aborting the whole run.
+                    # 1. Fast Dialog Radar: If a modal or Report window is already blocking the UI, skip to click_ok
                     blocker_active = False
-                    try:
-                        for w in Desktop(backend="uia").windows(process=cached_app_pid, top_level_only=True) if cached_app_pid else []:
-                            t = str(w.window_text()).strip()
-                            if (t and t != main_frame_title
-                                    and re.search(r"(?i).*(cross|information|imported|confirmation|notice|message|error|warning|fatal).*", t)):
-                                logger.warning(f"Active result dialog '{t}' detected; skipping grid verification.")
+                    desktop_win32 = Desktop(backend="win32")
+                    for win in desktop_win32.windows(visible_only=True):
+                        if win.process_id() == cached_app_pid and win.handle != main_window.handle:
+                            w_title = win.window_text().lower()
+                            w_cls = win.class_name()
+                            if any(k in w_title for k in ["cross", "information", "imported", "message", "notice", "error", "warning", "fatal", "report"]) or w_cls in ["#32770", "ThunderRT6FormDC"]:
+                                logger.warning(f"Active dialog/report window detected: '{win.window_text()}'. Skipping table wait to proceed to click_ok.")
                                 blocker_active = True
                                 break
-                    except Exception:
-                        pass
-                    if not blocker_active:
-                        raise RuntimeError(f"Failed while waiting for processing table to display records: {e}")
 
+                    # 2. Wait for grid only if no modal is active
+                    if not blocker_active:
+                        max_timeout = step.get('timeout', 30)
+                        start_time = time.time()
+                        table_ready = False
+
+                        while (time.time() - start_time) < max_timeout:
+                            try:
+                                import_window = _get_target_window(step)
+                                if auto_id:
+                                    table_grid = import_window.child_window(auto_id=str(auto_id), control_type=ctrl_type)
+                                else:
+                                    grid_cls = step.get('class_name', 'MSHFlexGridWndClass')
+                                    table_grid = import_window.child_window(class_name=grid_cls, control_type=ctrl_type, found_index=0)
+
+                                if table_grid.exists(timeout=1):
+                                    table_ready = True
+                                    break
+                            except Exception:
+                                pass
+                            time.sleep(1.5)
+
+                        if table_ready:
+                            logger.info("Data table successfully loaded and populated with imported values.")
+                        else:
+                            logger.warning("Table grid did not populate within timeout; deferring to click_ok to handle dialog.")
+                except Exception as e:
+                    logger.warning(f"Table verification skipped: {e}. Advancing directly to click_ok.")
+            # ============================================================
+            # 8. DYNAMIC CONFIRMATION / MULTI-DIALOG OK CLICK HANDLER
+            # ============================================================
             # ============================================================
             # 8. DYNAMIC CONFIRMATION / MULTI-DIALOG OK CLICK HANDLER
             # ============================================================
             elif action == "click_ok":
                 logger.info(f"Executing Process Confirmation Target Step: {desc}")
-                desktop = Desktop(backend="uia")
                 desktop_win32 = Desktop(backend="win32")
                 target_pid = cached_app_pid
                 max_dialog_checks = step.get('max_popup_count', 5)
                 dialogs_cleared = 0
                 exit_dialog_seen = False
 
+                # Format routing flags
+                is_two_popup_scenario = False
+                custom_failure_status = None
+                captured_error_details = ""
+
                 for check_idx in range(1, max_dialog_checks + 1):
                     logger.info(f"Polling for active pop-up dialog window (Attempt {check_idx}/{max_dialog_checks})...")
                     btn_clicked = False
                     active_dialog = None
 
-                    # Strategy 1: Search top-level modal popups strictly within target application PID.
-                    # Result dialogs often carry the app name itself as their title (e.g. a popup
-                    # titled 'Cross'), so we ENUMERATE the app's top-level windows and skip the
-                    # main frame — a single window() lookup would match the main window first.
+                    # 1. Detect any visible modal dialog belonging to Cross
                     try:
-                        dialog_title_cfg = step.get('dialog_title') or step.get('window_title')
-                        dialog_candidates = []
+                        for win in desktop_win32.windows(visible_only=True):
+                            if win.process_id() == target_pid and win.handle != main_window.handle:
+                                w_cls = win.class_name()
+                                w_title = win.window_text().strip()
+                                if (w_cls in ["#32770", "ThunderRT6FormDC"] or 
+                                    re.search(r"(?i).*(Cross|Information|Message|Confirmation|Notice|Alert|Error|Warning|Fatal|Report).*", w_title)):
+                                    active_dialog = win
+                                    break
+                    except Exception as scan_err:
+                        logger.debug(f"Win32 dialog scan error: {scan_err}")
 
-                        if dialog_title_cfg and target_pid:
-                            spec = desktop.window(
-                                title_re=f"(?i).*{re.escape(dialog_title_cfg)}.*",
-                                top_level_only=True,
-                                process=target_pid
-                            )
-                            if spec.exists(timeout=2):
-                                dialog_candidates.append(spec)
-                        elif target_pid:
-                            for w in desktop.windows(process=target_pid, top_level_only=True):
-                                w_title = str(w.window_text()).strip()
-                                if w_title and w_title != main_frame_title:
-                                    dialog_candidates.append(w)
-                        else:
-                            spec = desktop.window(
-                                title_re=r"(?i).*(Cross|Information|Message|Confirmation|Notice|Alert|Error|Warning|Fatal).*",
-                                top_level_only=True
-                            )
-                            if spec.exists(timeout=2):
-                                dialog_candidates.append(spec)
+                    if not active_dialog:
+                        logger.info(f"No active popup dialog found on attempt #{check_idx}.")
+                        break
 
-                        for active_dialog in dialog_candidates:
+                    try:
+                        active_dialog.set_focus()
+                    except Exception:
+                        pass
+                    time.sleep(0.3)
+
+                    dlg_title = active_dialog.window_text()
+                    body_texts = [dlg_title]
+                    clean_report_text = ""
+                    try:
+                        for ctrl in active_dialog.descendants():
                             try:
-                                active_dialog.set_focus()
+                                t = ctrl.window_text().strip()
+                                if t: body_texts.append(t)
+                                if ctrl.class_name() == "RichTextWndClass":
+                                    clean_report_text = t
                             except Exception:
                                 pass
-                            time.sleep(0.3)
+                    except Exception as ext_err:
+                        logger.debug(f"Descendant text extraction error: {ext_err}")
 
-                            # Trace EVERY popup we act on: title, message text, buttons.
-                            dlg_title, dlg_texts, dlg_buttons = _inspect_dialog(active_dialog)
-                            logger.info(
-                                f"[DIALOG-TRACE] Popup candidate (attempt {check_idx}): '{dlg_title}' | "
-                                f"text: {dlg_texts} | buttons: {dlg_buttons}"
-                            )
+                    # Exit dialog safety check
+                    if _looks_like_exit_dialog(dlg_title, body_texts):
+                        logger.critical(f"[EXIT-TRACE] Exit dialog detected: '{dlg_title}'. Suppressing Enter/Yes.")
+                        exit_dialog_seen = True
+                        break
 
-                            if _looks_like_exit_dialog(dlg_title, dlg_texts):
-                                # SAFETY GUARD: click_ok is meant for result dialogs (OK /
-                                # confirmation), NEVER for closing the app. If an exit/close
-                                # prompt shows up here we do not answer it — we log it loudly,
-                                # screenshot it, and stop dismissing popups so the real error
-                                # surfaces instead of the app silently dying.
-                                logger.critical(
-                                    f"[EXIT-TRACE] Exit/close dialog appeared unexpectedly at step "
-                                    f"'{desc}': '{dlg_title}' text={dlg_texts} buttons={dlg_buttons}. "
-                                    f"REFUSING to click any button on it — the app will NOT be "
-                                    f"closed by this step."
-                                )
-                                try:
-                                    day_folder = datetime.now().strftime("%Y-%m-%d")
-                                    shot_dir = os.path.join(BASE_OUTPUT_DIR, day_folder, current_batch_name or process_name)
-                                    os.makedirs(shot_dir, exist_ok=True)
-                                    capture_screenshot(os.path.join(
-                                        shot_dir, f"EXIT_DIALOG_{datetime.now().strftime('%H-%M-%S')}.png"))
-                                except Exception:
-                                    pass
-                                exit_dialog_seen = True
-                                break
+                    full_popup_text = " ".join(body_texts).lower()
+                    meaningful_texts = [
+                        t for t in body_texts 
+                        if t.strip() and t.strip().lower() not in ["information", "cross", "ok", "yes", "no", "cancel", "report"]
+                    ]
+                    current_dialog_msg = " ".join(meaningful_texts).strip()
 
-                            # DATA EXTRACTION: Read specific internal label texts (e.g. RichText fields)
-                            body_texts = [active_dialog.window_text()]
-                            clean_report_text = ""
-                            for ctrl in active_dialog.descendants():
-                                try:
-                                    t = ctrl.window_text().strip()
-                                    if t: body_texts.append(t)
-                                    if ctrl.class_name() == "RichTextWndClass":
-                                        clean_report_text = t
-                                except Exception:
-                                    pass
+                    # ========================================================
+                    # 2. ERROR ROUTING (2-POPUPS vs 1-POPUP + WHITE REPORT)
+                    # ========================================================
+                    
+                    # --------------------------------------------------------
+                    # CASE A: THE 2-POPUPS SCENARIO (Pre-validation / Headers)
+                    # --------------------------------------------------------
+                    if not is_two_popup_scenario and "dpid mismatch" in full_popup_text:
+                        import_failed = True
+                        overall_process_failed = True
+                        is_two_popup_scenario = True
+                        custom_failure_status = "FAILED - Invalid File Selected"
+                        captured_error_details = "DPID Mismatch."
+                        logger.warning("Captured Popup 1: DPID Mismatch")
 
-                            # FAILURE EVALUATION: flag the run when the dialog text carries
-                            # known error keywords (RichText fields carry the real report).
-                            full_popup_text = " ".join(body_texts).lower()
-                            if any(word in full_popup_text for word in ["error", "fatal", "warning", "fail", "invalid", "not found", "unsuccess", "mismatch"]):
-                                logger.warning("Tampered file error caught in modal.")
-                                import_failed = True
-                                overall_process_failed = True
-                                failure_reason = clean_report_text.replace('\n', ' ').strip() if clean_report_text else dlg_title
+                    elif not is_two_popup_scenario and "date mismatch" in full_popup_text:
+                        import_failed = True
+                        overall_process_failed = True
+                        is_two_popup_scenario = True
+                        custom_failure_status = "FAILED - File Import Failed"
+                        date_match = re.search(r"file date is\s*([0-9]{2}/[0-9]{2}/[0-9]{4})", full_popup_text)
+                        if date_match:
+                            captured_error_details = f"Screen Date and File Date mismatch (File Date is {date_match.group(1)})"
+                        else:
+                            captured_error_details = "Screen Date and File Date mismatch"
+                        logger.warning(f"Captured Popup 1: {captured_error_details}")
 
-                            # Find target button inside modal
-                            if auto_id:
-                                target_btn = active_dialog.child_window(auto_id=str(auto_id), control_type=ctrl_type)
-                            else:
-                                btn_title = step.get('title') or step.get('text', 'OK')
-                                target_btn = active_dialog.child_window(title_re=f"(?i).*{re.escape(btn_title)}.*", control_type=ctrl_type)
+                    elif not is_two_popup_scenario and any(k in full_popup_text for k in ["no record", "no records", "0 record"]):
+                        import_failed = True
+                        overall_process_failed = True
+                        is_two_popup_scenario = True
+                        custom_failure_status = "FAILED - File Import Failed"
+                        captured_error_details = "No Records Found in File"
+                        logger.warning("Captured Popup 1: No Records Found in File")
 
-                            # Click OK / Yes / Close
-                            btn_title = step.get('title') or step.get('text', 'OK')
-                            target_btn = active_dialog.child_window(title_re=f"(?i).*{re.escape(btn_title)}.*", class_name="Button")
-                            if not target_btn.exists():
-                                target_btn = active_dialog.child_window(title_re=r"(?i).*(OK|Yes|Close|Dismiss).*", class_name="Button")
+                    # Handle Popup 2 of the 2-popup chain (Dismiss without overwriting Popup 1 details)
+                    elif is_two_popup_scenario and any(k in full_popup_text for k in ["invalid file selected", "file import failed", "import failed"]):
+                        logger.info(f"Dismissing Popup 2 ('{current_dialog_msg or full_popup_text}') while keeping Popup 1 root cause intact.")
 
-                            if target_btn.exists():
-                                target_btn.click_input()
-                                dialogs_cleared += 1
-                                btn_clicked = True
-                                time.sleep(1.2)
-                                break
-                    except Exception as modal_err:
-                        logger.debug(f"Modal popup search iteration {check_idx}: {modal_err}")
+                    # --------------------------------------------------------
+                    # CASE B: THE 1-POPUP + WHITE REPORT SCENARIO (SOH / COD)
+                    # --------------------------------------------------------
+                    elif not is_two_popup_scenario and any(k in full_popup_text for k in ["incomplete", "fail", "error", "fatal", "unsuccess", "mismatch"]):
+                        import_failed = True
+                        overall_process_failed = True
+                        custom_failure_status = "FAILED - DATA ERROR"
+                        if not captured_error_details:
+                            captured_error_details = clean_report_text.replace('\n', ' ').strip() if clean_report_text else (current_dialog_msg or "File Imported(Incomplete)")
+                        logger.warning(f"Captured Data Error modal: '{captured_error_details}'")
 
-                    # An exit/close dialog must never fall through to the generic strategies.
+                    # 3. DISMISS MODAL (Click OK button or fallback to Enter)
+                    try:
+                        for ctrl in active_dialog.descendants():
+                            try:
+                                c_text = ctrl.window_text().strip().lower()
+                                c_cls = ctrl.class_name().lower()
+                                if ("ok" in c_text or "&ok" in c_text) and ("button" in c_cls):
+                                    ctrl.click()
+                                    btn_clicked = True
+                                    dialogs_cleared += 1
+                                    time.sleep(1.2)
+                                    break
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+
                     if exit_dialog_seen:
                         break
 
-                    # Strategy 2: Search inside main_window children
                     if not btn_clicked:
-                        try:
-                            if auto_id:
-                                target_btn = main_window.child_window(auto_id=str(auto_id), control_type=ctrl_type)
-                            else:
-                                btn_title = step.get('title') or step.get('text', 'OK')
-                                target_btn = main_window.child_window(title_re=f"(?i).*{re.escape(btn_title)}.*", control_type=ctrl_type)
-
-                            if target_btn.exists(timeout=1):
-                                logger.info(f"🖱️ Clicking button inside main window context (Popup #{check_idx})...")
-                                target_btn.click_input()
-                                dialogs_cleared += 1
-                                btn_clicked = True
-                                time.sleep(1.2)
-                        except Exception:
-                            pass
-
-                    # Fallback keypress dismissal
-                    if not btn_clicked:
-                        if check_idx == 1:
-                            # ENTER presses the DEFAULT button, which is 'Yes' on close/exit
-                            # prompts — never send it blindly into an exit-looking window.
-                            fg_info = _get_foreground_window_info()
-                            if any(h in fg_info.lower() for h in _EXIT_DIALOG_HINTS):
-                                logger.critical(
-                                    f"[EXIT-TRACE] Blind ENTER SUPPRESSED: the foreground window "
-                                    f"looks like an exit/close dialog: {fg_info}. "
-                                    f"Not sending keys; leaving dialog untouched."
-                                )
-                                exit_dialog_seen = True
-                                break
-                            fg_pid = _get_foreground_pid()
-                            if target_pid and fg_pid is not None and fg_pid != target_pid:
-                                logger.warning(
-                                    f"[KEY-TRACE] Blind ENTER suppressed: the foreground window "
-                                    f"belongs to process {fg_pid} (not the target app {target_pid}). "
-                                    f"Not sending keys outside the target application."
-                                )
-                            else:
-                                logger.info("No explicit button caught via UIA. Sending Enter keypress to clear active modal...")
-                                _send_keys_traced(f"click_ok '{desc}' (blind ENTER fallback)", "{ENTER}")
-                                dialogs_cleared += 1
-                                time.sleep(1.0)
-                        else:
-                            break
+                        _send_keys_traced(f"click_ok '{desc}'", "{ENTER}")
+                        dialogs_cleared += 1
+                        time.sleep(1.2)
 
                 logger.info(f"✓ Cleared total of {dialogs_cleared} pop-up dialog window(s).")
 
-                
-                # WIN32 AGGRESSIVE SWEEP AND DESTROY POST-OK
-                logger.info("Sweeping strictly for secondary white report windows post-OK...")
-                time.sleep(1.5)
+                # ============================================================
+                # 4. SWEEP WHITE REPORT WINDOW (ONLY FOR CASE B: SOH/COD)
+                # ============================================================
+                time.sleep(1.2)
                 try:
-                    desktop_win32 = Desktop(backend="win32") 
-                    
                     for leftover_win in desktop_win32.windows(visible_only=True):
-                        if leftover_win.process_id() == cached_app_pid:
+                        if leftover_win.process_id() == cached_app_pid and leftover_win.handle != main_window.handle:
                             w_title = leftover_win.window_text()
-                            
-                            # UNIVERSAL GUARD: Protect main window for BOTH Estro and Cross
-                            is_main_app = (leftover_win.handle == main_window.handle) or any(
-                                app in w_title.lower().strip()[:6] for app in ["estro", "cross"]
-                            )
-
+                            is_main_app = any(app in w_title.lower().strip()[:6] for app in ["estro", "cross"])
                             if "report" in w_title.lower() and not is_main_app:
-                                logger.info(f"Target locked. Inspecting report window before destroy: {w_title}")
-                                
-                                # 1. Extract report error details before destroying the window
-                                try:
-                                    for ctrl in leftover_win.descendants():
-                                        if ctrl.class_name() == "RichTextWndClass":
-                                            rt_text = ctrl.window_text().strip()
-                                            if rt_text:
-                                                failure_reason = rt_text.replace('\n', ' ').replace('\r', '').strip()
-                                                import_failed = True
-                                                overall_process_failed = True
-                                                logger.info(f"Extracted rich report text: '{failure_reason[:80]}...'")
-                                                break
-                                except Exception as extract_err:
-                                    logger.debug(f"Could not read RichText from report window: {extract_err}")
-
-                                # 2. Close and release window
-                                try:
-                                    leftover_win.set_focus()
-                                    time.sleep(0.2)
-                                    leftover_win.close() 
-                                    time.sleep(0.5)
-                                except Exception:
-                                    pass
-                                
-                                if leftover_win.exists():
+                                logger.info(f"Inspecting white report window: {w_title}")
+                                # Only read from white report if this is NOT a 2-popup header error
+                                if not is_two_popup_scenario:
                                     try:
-                                        send_keys("%{F4}")
-                                        time.sleep(0.3)
-                                        send_keys("%{c}")
-                                        time.sleep(0.3)
-                                        send_keys("{ESC}")
-                                        time.sleep(0.5)
-                                    except Exception:
-                                        pass
-                except Exception as cleanup_err:
-                    logger.debug(f"Failed to clear leftover report windows: {cleanup_err}")
+                                        for ctrl in leftover_win.descendants():
+                                            if ctrl.class_name() == "RichTextWndClass":
+                                                rt_text = ctrl.window_text().strip()
+                                                if rt_text:
+                                                    captured_error_details = rt_text.replace('\n', ' ').replace('\r', '').strip()
+                                                    import_failed = True
+                                                    custom_failure_status = "FAILED - DATA ERROR"
+                                                    break
+                                    except Exception as extract_err:
+                                        logger.debug(f"RichText extraction error: {extract_err}")
+
+                                try:
+                                    leftover_win.close()
+                                    time.sleep(0.4)
+                                except Exception:
+                                    send_keys("%{F4}")
+                except Exception as sweep_err:
+                    logger.debug(f"Report sweep error: {sweep_err}")
+
                 if recorder.is_active():
                     recorder.stop()
 
-                # Dispatch Per-Batch Email
-                if current_batch_name:
-                    try:
-                        day_folder = datetime.now().strftime("%Y-%m-%d")
-                        screenshot_folder = os.path.join(BASE_OUTPUT_DIR, day_folder, current_batch_name or process_name)
-                        os.makedirs(screenshot_folder, exist_ok=True)
-                        target_path = os.path.join(screenshot_folder, f"screenshot_{datetime.now().strftime('%H-%M-%S')}.png")
-                        actual_saved_path = capture_screenshot(target_path) or target_path
+                # ============================================================
+                # 5. GUARANTEED EMAIL DISPATCH (NEVER DROPS CLIENT/ISIN MASTER)
+                # ============================================================
+                # Always resolve a valid batch name so the email block NEVER skips
+                batch_key = current_batch_name or f"{process_name}_{last_client_value or 'Import'}_{datetime.now().strftime('%H-%M-%S')}"
+                try:
+                    day_folder = datetime.now().strftime("%Y-%m-%d")
+                    screenshot_folder = os.path.join(BASE_OUTPUT_DIR, day_folder, batch_key)
+                    os.makedirs(screenshot_folder, exist_ok=True)
+                    target_path = os.path.join(screenshot_folder, f"screenshot_{datetime.now().strftime('%H-%M-%S')}.png")
+                    actual_saved_path = capture_screenshot(target_path) or target_path
 
-                        table_rows = [
-                            ("Process Status", "FAILED - DATA ERROR" if import_failed else "SUCCESSFUL"),
-                            ("Process", process_name),
-                            ("Date", current_json_date),
-                            ("Client Value", current_client_value),
-                            ("Execution Time", current_exec_time),
-                        ]
-                        if import_failed:
-                            table_rows.append(("Error Details", failure_reason or "Tampered file rejected"))
+                    if import_failed:
+                        process_status_label = custom_failure_status or "FAILED - DATA ERROR"
+                    else:
+                        process_status_label = "SUCCESSFUL"
 
-                        send_batch_report_email(
-                            smtp_config=smtp_config,
-                            mail_config=mail_config,
-                            table_rows=table_rows,
-                            screenshot_path=actual_saved_path,
-                            default_subject=f"Import Batch Report - {process_name} {'[FAILED]' if import_failed else ''}".strip(),
-                        )
-                    except Exception as e:
-                        logger.error(f"Failed to send batch report email: {e}", exc_info=True)
+                    table_rows = [
+                        ("Process Status", process_status_label),
+                        ("Process", process_name),
+                        ("Date", current_json_date or datetime.now().strftime("%d%b%Y")),
+                        ("Client Value", current_client_value or last_client_value or "Unspecified"),
+                        ("Execution Time", current_exec_time or datetime.now().strftime("%H-%M-%S")),
+                    ]
+                    if import_failed:
+                        table_rows.append(("Error Details", captured_error_details or failure_reason or "Application Data Error"))
 
-                    import_failed = False
-                    current_batch_name = None            
+                    send_batch_report_email(
+                        smtp_config=smtp_config,
+                        mail_config=mail_config,
+                        table_rows=table_rows,
+                        screenshot_path=actual_saved_path,
+                        default_subject=f"Import Batch Report - {process_name} {'[FAILED]' if import_failed else ''}".strip(),
+                    )
+                    logger.info(f"📧 Batch report email sent for '{batch_key}' with status: {process_status_label}")
+                except Exception as e:
+                    logger.error(f"Failed to send batch report email: {e}", exc_info=True)
+
+                if import_failed:
+                    skip_until_next_batch = True
+
+                # Reset states cleanly for the next file in JSON
+                import_failed = False
+                failure_reason = ""
+                custom_failure_status = None
+                captured_error_details = ""
+                current_batch_name = None
             # ============================================================
             # 8B. DYNAMIC EXPLICIT REPORT / EMAIL DISPATCH HANDLER
             # ============================================================
