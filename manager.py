@@ -978,12 +978,21 @@ def trigger_existing_script(process_name):
             act_entry = latest_result_entry(process_name)
             today_str = datetime.now().strftime("%d-%b-%Y")
 
-            # Validate log.json entry only if it was recorded today
+            # Only use log.json entry if it was recorded during THIS attempt run
+            entry_is_current = False
             if act_entry is not None and act_entry.get("date") == today_str:
+                try:
+                    entry_dt = datetime.strptime(f"{today_str} {act_entry.get('time')}", "%d-%b-%Y %H:%M:%S")
+                    if entry_dt >= (start_total_time - timedelta(seconds=5)):
+                        entry_is_current = True
+                except Exception:
+                    entry_is_current = False
+
+            if entry_is_current:
                 act_status = str(act_entry.get("Status") or act_entry.get("status") or "").strip().lower()
                 is_success = (result.returncode == 0 and act_status == "success")
             else:
-                # Require exit code 0 AND ensure no error/failure strings are in stdout/stderr
+                # Fallback: Check exit code and ensure no failure keywords exist in stdout/stderr
                 is_success = (
                     result.returncode == 0 and 
                     "❌ FAILURE" not in combined_output and

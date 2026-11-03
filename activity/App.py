@@ -828,10 +828,10 @@ def main():
                 
         if status is True: 
             print("\n🎉 Run finished successfully!")
+            return True
         else: 
             print("\n❌ Automation process terminated with errors.")
             sys.exit(1)
-
     finally:
         print("\n🧹 Final cleanup: Killing all CDSL and Report Download instances...")
         kill_all_cdsl_processes()

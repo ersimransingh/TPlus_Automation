@@ -392,15 +392,31 @@ def run_universal_automation():
     logger.info(f"🔑 Environment ACTIVE_TASK_ID set to: '{os.environ['ACTIVE_TASK_ID']}'")
     logger.info(f"📦 Environment DYNAMIC_RUN_PROFILE keys: {list(process_data.keys())}")
 
-    # --- BRANCH 1: CDAS AUTOMATION PIPELINE ---
+    # --- BRANCH 1: CDAS AUTOMATION PIPELINE -
     if any(k in process_data for k in ("download_task", "setup_tasks", "cdsl_download", "cdsl_setup")):
         logger.info("🌐 [ROUTER] Signature Matched: CDAS AUTOMATION PIPELINE")
+        cdas_ok = False
+        cdas_reason = ""
         try:
-            from App import main as run_cdas_app
-            run_cdas_app()
-        except ImportError:
-            import App
-            App.main()
+            try:
+                from App import main as run_cdas_app
+                status = run_cdas_app()
+            except ImportError:
+                import App
+                status = App.main()
+            cdas_ok = True if status is not False else False
+        except SystemExit as se:
+            cdas_ok = (se.code == 0 or se.code is None)
+            if not cdas_ok:
+                cdas_reason = f"CDAS exited with error code: {se.code}"
+        except Exception as cdas_err:
+            cdas_ok = False
+            cdas_reason = str(cdas_err)
+            logger.error(f"CDAS pipeline exception: {cdas_err}")
+
+        # Record result in schedule_log/log.json so manager.py reads success
+        write_activity_result(matched_key, ok=cdas_ok, reason=cdas_reason)
+        sys.exit(0 if cdas_ok else 1)
 
     # --- BRANCH 2: CROSS STEP-BASED AUTOMATION PIPELINE ---
     elif "steps" in process_data or "common_steps" in master_config:

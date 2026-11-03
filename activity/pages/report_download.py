@@ -644,14 +644,6 @@ def process_single_report_task(app, report_win, task, task_index, total_tasks, e
             pass
         time.sleep(0.1)
 
-        # 1. Click specifically on the left edge (coords=(15, 12)) where the Day digits sit
-        pane.click_input(coords=(15, 12))
-        time.sleep(0.2)
-
-        # 2. Guarantee the cursor jumps to the first segment (Day)
-        send_keys("{HOME}")
-        time.sleep(0.1)
-
         month_map = {
             "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
             "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12
@@ -665,22 +657,31 @@ def process_single_report_task(app, report_win, task, task_index, total_tasks, e
 
         print(f"📅 Typing resolved date into CDSL control: {d_num}-{m_num}-{y_num}")
 
-        # Step A: Type 2-digit day
-        send_keys(d_num)
+        # --- PASS 1: Standard typing (works 100% for days 01 through 30) ---
+        pane.click_input(coords=(15, 12))
         time.sleep(0.15)
+        send_keys(d_num)
+        time.sleep(0.1)
 
-        # Step B: Move right to Month segment and type 2-digit month
         send_keys("{RIGHT}")
         time.sleep(0.1)
         send_keys(m_num)
-        time.sleep(0.15)
+        time.sleep(0.1)
 
-        # Step C: Move right to Year segment and type 4-digit year
         send_keys("{RIGHT}")
         time.sleep(0.1)
         send_keys(y_num)
-        time.sleep(0.25)
+        time.sleep(0.2)
 
+        # --- PASS 2: ONLY for Day 31 ---
+        # For dates 01 to 30, do NOT touch the control again.
+        # Only when day is 31 (clamped by a 30-day month), re-enter 31 now that Month is set.
+        if int(day_val) == 31:
+            pane.click_input(coords=(15, 12))
+            time.sleep(0.15)
+            send_keys("31")
+            time.sleep(0.2)
+                            
     # 3. Fill From Date
     if day_from and month_from and year_from:
         date_from_pane = report_win.child_window(auto_id="_Date_from", control_type="Pane")
