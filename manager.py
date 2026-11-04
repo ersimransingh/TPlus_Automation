@@ -950,7 +950,7 @@ def trigger_existing_script(process_name):
                 cmd = [sys.executable, existing_script_exe, "--config", ACTIVITY_PATH, "--process", process_name]
 
             # Suppress window creation for child processes on Windows
-            creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+            creation_flags = 0
 
             result = subprocess.run(
                 cmd,

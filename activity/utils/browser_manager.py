@@ -27,8 +27,7 @@ class BrowserManager:
         # Enable video recording and explicit file downloads in context
         context = browser.new_context(
             no_viewport=True,
-            accept_downloads=True,
-            record_video_dir=recordings_dir
+            accept_downloads=True
         )
         context.clear_cookies()
         return browser, context

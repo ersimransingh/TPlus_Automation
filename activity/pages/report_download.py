@@ -381,7 +381,7 @@ def click_grid_download_button(*containers, auto_id="cmdDownload", timeout=5):
     print("⚠️ Could not locate the 'cmdDownload' button in any candidate window.")
     return False
 
-def handle_post_download_dialogs(app, overwrite_wait=4, complete_wait=90):
+def handle_post_download_dialogs(app, overwrite_wait=4, complete_wait=45):
     dialog_screenshots = []
     try:
         popup = app.top_window()
