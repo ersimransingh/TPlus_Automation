@@ -1135,6 +1135,8 @@ def handle_administration(main_window, process_config, global_config=None, proce
                 is_two_popup_scenario = False
                 custom_failure_status = None
                 captured_error_details = ""
+                actual_saved_path = None
+
 
                 for check_idx in range(1, max_dialog_checks + 1):
                     logger.info(f"Polling for active pop-up dialog window (Attempt {check_idx}/{max_dialog_checks})...")
@@ -1164,6 +1166,17 @@ def handle_administration(main_window, process_config, global_config=None, proce
                         pass
                     time.sleep(0.3)
 
+                    # --- SNAP SCREENSHOT NOW (WHILE POPUP IS STILL ON SCREEN) ---
+                    if check_idx == 1 and not actual_saved_path:
+                        try:
+                            day_folder = datetime.now().strftime("%Y-%m-%d")
+                            shot_folder = os.path.join(BASE_OUTPUT_DIR, day_folder, current_batch_name or process_name)
+                            os.makedirs(shot_folder, exist_ok=True)
+                            target_shot = os.path.join(shot_folder, f"POPUP_{datetime.now().strftime('%H-%M-%S')}.png")
+                            actual_saved_path = capture_screenshot(target_shot) or target_shot
+                        except Exception as shot_err:
+                            logger.debug(f"Popup screenshot capture error: {shot_err}")
+                    # -----------------------------------------------------------
                     dlg_title = active_dialog.window_text()
                     body_texts = [dlg_title]
                     clean_report_text = ""
@@ -1285,20 +1298,32 @@ def handle_administration(main_window, process_config, global_config=None, proce
                                     try:
                                         for ctrl in leftover_win.descendants():
                                             if ctrl.class_name() == "RichTextWndClass":
-                                                rt_text = ctrl.window_text().strip()
-                                                if rt_text:
-                                                    captured_error_details = rt_text.replace('\n', ' ').replace('\r', '').strip()
-                                                    import_failed = True
-                                                    custom_failure_status = "FAILED - DATA ERROR"
-                                                    break
+                                               rt_text = ctrl.window_text().strip()
+                                               if rt_text:
+                                                  clean_lines = [re.sub(r'[-=_]{2,}', '', L).strip() for L in rt_text.splitlines()]
+                                                  clean_lines = [L for L in clean_lines if L and not re.search(r'(?i)print date', L)]
+                                                  captured_error_details = clean_lines[-1] if clean_lines else "File Imported (Incomplete)"
+                                                  import_failed = True
+                                                  custom_failure_status = "FAILED - DATA ERROR"
+                                                  break
                                     except Exception as extract_err:
                                         logger.debug(f"RichText extraction error: {extract_err}")
+
+                                # Capture the screenshot NOW while the white report error is still on screen
+                                if import_failed and not actual_saved_path:
+                                    try:
+                                        shot_folder = os.path.join(BASE_OUTPUT_DIR, datetime.now().strftime("%Y-%m-%d"), current_batch_name or process_name)
+                                        os.makedirs(shot_folder, exist_ok=True)
+                                        target_shot = os.path.join(shot_folder, f"ERROR_CAPTURE_{datetime.now().strftime('%H-%M-%S')}.png")
+                                        actual_saved_path = capture_screenshot(target_shot) or target_shot
+                                    except Exception as shot_err:
+                                        logger.debug(f"Pre-close screenshot capture error: {shot_err}")
 
                                 try:
                                     leftover_win.close()
                                     time.sleep(0.4)
                                 except Exception:
-                                    send_keys("%{F4}")
+                                    send_keys("%{F4}")   
                 except Exception as sweep_err:
                     logger.debug(f"Report sweep error: {sweep_err}")
 
@@ -1314,9 +1339,11 @@ def handle_administration(main_window, process_config, global_config=None, proce
                     day_folder = datetime.now().strftime("%Y-%m-%d")
                     screenshot_folder = os.path.join(BASE_OUTPUT_DIR, day_folder, batch_key)
                     os.makedirs(screenshot_folder, exist_ok=True)
-                    target_path = os.path.join(screenshot_folder, f"screenshot_{datetime.now().strftime('%H-%M-%S')}.png")
-                    actual_saved_path = capture_screenshot(target_path) or target_path
-
+                    
+                    # Only take a new screenshot if an error screenshot wasn't already taken above
+                    if not actual_saved_path:
+                        target_path = os.path.join(screenshot_folder, f"screenshot_{datetime.now().strftime('%H-%M-%S')}.png")
+                        actual_saved_path = capture_screenshot(target_path) or target_path
                     if import_failed:
                         process_status_label = custom_failure_status or "FAILED - DATA ERROR"
                     else:
@@ -1357,6 +1384,7 @@ def handle_administration(main_window, process_config, global_config=None, proce
             # ============================================================
             elif action == "send_report":
                 logger.info(f"Executing Batch Report Notification Dispatch Step: {desc}")
+                actual_saved_path = None
                 
                 if recorder.is_active():
                     recorder.stop()
@@ -1393,10 +1421,23 @@ def handle_administration(main_window, process_config, global_config=None, proce
                                     
                                     # Use clean RichTextWndClass text if available without the prefix
                                     if clean_report_text:
-                                        failure_reason = clean_report_text.replace('\n', ' ').replace('\r', '').strip()
+                                        clean_lines = [re.sub(r'[-=_]{2,}', '', L).strip() for L in clean_report_text.splitlines()]
+                                        clean_lines = [L for L in clean_lines if L and not re.search(r'(?i)print date', L)]
+                                        failure_reason = clean_lines[-1] if clean_lines else "File Imported(incomplete)"
                                     else:
-                                        failure_reason = win.window_text().strip()                                    
-                                   # WIN32 TARGETED CLOSE LINGERING WINDOW
+                                        failure_reason = win.window_text().strip()
+
+                                    # Capture screenshot NOW while dialog/error is still on screen
+                                    try:
+                                        day_folder = datetime.now().strftime("%Y-%m-%d")
+                                        shot_folder = os.path.join(BASE_OUTPUT_DIR, day_folder, current_batch_name or process_name)
+                                        os.makedirs(shot_folder, exist_ok=True)
+                                        target_shot = os.path.join(shot_folder, f"ERROR_CAPTURE_{datetime.now().strftime('%H-%M-%S')}.png")
+                                        actual_saved_path = capture_screenshot(target_shot) or target_shot
+                                    except Exception as shot_err:
+                                        logger.debug(f"send_report pre-close screenshot error: {shot_err}")
+
+                                    # WIN32 TARGETED CLOSE LINGERING WINDOW
                                     logger.info("Attempting to forcefully close lingering white report window in send_report...")
                                     w_title = win.window_text()
                                     
@@ -1405,7 +1446,7 @@ def handle_administration(main_window, process_config, global_config=None, proce
                                         try:
                                             win.set_focus()
                                             time.sleep(0.2)
-                                            win.close() 
+                                            win.close()                                            
                                             time.sleep(0.5)
                                         except Exception:
                                             pass
@@ -1433,8 +1474,9 @@ def handle_administration(main_window, process_config, global_config=None, proce
                         screenshot_folder = os.path.join(BASE_OUTPUT_DIR, day_folder, current_batch_name or process_name)
                         os.makedirs(screenshot_folder, exist_ok=True)
                         
-                        target_path = os.path.join(screenshot_folder, f"screenshot_{datetime.now().strftime('%H-%M-%S')}.png")
-                        actual_saved_path = capture_screenshot(target_path) or target_path
+                        if not actual_saved_path:
+                            target_path = os.path.join(screenshot_folder, f"screenshot_{datetime.now().strftime('%H-%M-%S')}.png")
+                            actual_saved_path = capture_screenshot(target_path) or target_path
 
                         # FIX: Removed overall_process_failed so per-file reporting is accurate
                         table_rows = [
@@ -1445,7 +1487,7 @@ def handle_administration(main_window, process_config, global_config=None, proce
                             ("Execution Time", current_exec_time),
                         ]
                         if import_failed:
-                            table_rows.append(("Error Details", failure_reason or "Tampered file rejected"))
+                            table_rows.append(("Error Details", failure_reason or "File Import Validation Error"))
                         
                         send_batch_report_email(
                             smtp_config=smtp_config,
