@@ -1004,7 +1004,7 @@ def trigger_existing_script(process_name):
             if is_success:
                 duration_delta = str(datetime.now() - start_total_time)
                 log_message(f"✅ Success: {process_name} executed successfully.", "INFO")
-                write_summary_log(process_name, "success")
+                #write_summary_log(process_name, "success")
 
                 # DISPATCH SUCCESS REPORT EMAIL
                 send_manager_status_email(
@@ -1038,7 +1038,7 @@ def trigger_existing_script(process_name):
             else:
                 duration_delta = str(datetime.now() - start_total_time)
                 log_message(f"❌ Critical: {process_name} failed all {max_retries} retries.", "CRITICAL")
-                write_summary_log(process_name, "unsuccess")
+                #write_summary_log(process_name, "unsuccess")
 
                 # DISPATCH FAILURE REPORT EMAIL
                 send_manager_status_email(
