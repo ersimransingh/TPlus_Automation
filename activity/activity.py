@@ -58,6 +58,7 @@ for p in (SCRIPT_DIR, PAGES_DIR):
         sys.path.insert(0, p)
 
 from logger_config import setup_logger
+from proc_utils import detached_dll_search
 
 logger = setup_logger()
 
@@ -263,7 +264,8 @@ def run_tradeplus_pipeline(master_config):
 
     try:
         logger.info(f"Launching target binary: {application_path}")
-        app = Application(backend="uia").start(application_path)
+        with detached_dll_search():
+            app = Application(backend="uia").start(application_path)
         time.sleep(6.0)
 
         logger.info(f"Performing login for username: '{username}'")
@@ -475,7 +477,8 @@ def run_universal_automation():
         backend_type = master_config.get('backend', 'uia')
         try:
             logger.info(f"Launching target binary: {app_path}")
-            app = Application(backend=backend_type).start(app_path)
+            with detached_dll_search():
+                app = Application(backend=backend_type).start(app_path)
             # pywinauto exposes the started PID as an int attribute
             launched_pid = getattr(app, 'process', None)
 
