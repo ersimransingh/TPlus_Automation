@@ -10,10 +10,36 @@ from utils.browser_manager import BrowserManager
 from pages.nsdl_login_page import LoginPage
 from pages.nsdl_dashboard_page import DashboardPage
 from logger_config import setup_logger
+from utils.email_manager import EmailManager
+from screenshot_util import capture_screenshot, BASE_SCREENSHOT_DIR
 
 logger = setup_logger()
 
 REQ_TRACKER_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "schedule_log", "nsdl_request_history.json")
+
+
+def _capture_nsdl_screenshot(prefix: str, page=None):
+    """Saves screenshot via screenshot_util and falls back to Playwright if needed."""
+    now = datetime.now()
+    output_path = os.path.join(
+        BASE_SCREENSHOT_DIR,
+        now.strftime("%Y-%m-%d"),
+        prefix,
+        f"screenshot_{now.strftime('%H-%M-%S')}.png",
+    )
+    try:
+        return capture_screenshot(output_path)
+    except Exception as err:
+        logger.warning(f"Screenshot capture warning ({prefix}): {err}")
+        try:
+            if page is not None and not page.is_closed():
+                os.makedirs(os.path.dirname(output_path), exist_ok=True)
+                page.screenshot(path=output_path, full_page=True)
+                return output_path
+        except Exception as fb_err:
+            logger.warning(f"Fallback screenshot capture warning ({prefix}): {fb_err}")
+    return None
+
 
 def get_previous_request_id(proc_key: str) -> str:
     """Retrieves the request ID generated earlier today, if any exists."""
@@ -28,6 +54,7 @@ def get_previous_request_id(proc_key: str) -> str:
     except Exception:
         pass
     return None
+
 
 def record_request_ids(proc_key: str, req_id: str):
     """Saves the pending Request ID for today in nsdl_request_history.json."""
@@ -52,6 +79,7 @@ def record_request_ids(proc_key: str, req_id: str):
     except Exception as e:
         logger.warning(f"⚠️ Failed to record request ID: {e}")
 
+
 def clear_request_history(proc_key: str):
     """Clears tracked IDs on successful download."""
     try:
@@ -64,6 +92,7 @@ def clear_request_history(proc_key: str):
                     json.dump(data, f, indent=2)
     except Exception:
         pass
+
 
 def execute_nsdl_process(proc_key: str, proc_config: dict, master_config: dict) -> tuple[bool, str]:
     global_settings = master_config.get("global_app_settings", {})
@@ -85,6 +114,14 @@ def execute_nsdl_process(proc_key: str, proc_config: dict, master_config: dict) 
     save_dir = os.path.join(base_path, folder_date)
     os.makedirs(save_dir, exist_ok=True)
 
+    # 3. Email notification setup
+    email_cfg = master_config.get("email_settings") or master_config.get("smtp_config")
+    email_mgr = EmailManager(email_cfg, SecurityManager)
+
+    email_notif = proc_config.get("email_notification") or {}
+    email_enabled = email_notif.get("enabled", True)
+    process_recipients = email_notif.get("recipients") or proc_config.get("recipients")
+
     poll_sec = proc_config.get("poll_interval_seconds", global_settings.get("poll_interval_seconds", 60))
     refresh_limit = proc_config.get("refresh_limit", global_settings.get("refresh_limit", 3))
 
@@ -105,14 +142,18 @@ def execute_nsdl_process(proc_key: str, proc_config: dict, master_config: dict) 
     with sync_playwright() as p:
         browser, context = BrowserManager.launch_clean_edge(p, base_download_path=base_path)
         page = context.new_page()
+        page.bring_to_front()
+        BrowserManager.bring_edge_to_front()
         dashboard_page = None
 
         try:
             # Step A: Formal Login
             login_page = LoginPage(page, locators)
             login_page.navigate(global_settings["url"])
+            page.bring_to_front()
+            BrowserManager.bring_edge_to_front()
             login_page.login(global_settings["user_id"], decoded_password)
-
+            
             dashboard_page = DashboardPage(page, locators)
 
             # =================================================================
@@ -153,13 +194,55 @@ def execute_nsdl_process(proc_key: str, proc_config: dict, master_config: dict) 
                     target_request_id=fresh_request_id
                 )
 
+            # Verify file physically exists in save_dir and is non-empty
+            if (
+                not downloaded_file
+                or not os.path.isfile(downloaded_file)
+                or os.path.getsize(downloaded_file) == 0
+            ):
+                raise FileNotFoundError(
+                    f"Download completed on portal, but no valid file was found in '{save_dir}'."
+                )
+
             # Clean up history file ONLY when download succeeds
             clear_request_history(proc_key)
             logger.info(f"✅ Success: {module_name} -> {downloaded_file}")
+
+            verified_name = os.path.basename(downloaded_file)
+            verified_size_kb = round(os.path.getsize(downloaded_file) / 1024, 2)
+            success_shot = _capture_nsdl_screenshot(f"NSDL_SUCCESS_{proc_key}", page=page)
+
+            if email_enabled:
+                email_mgr.send_process_email(
+                    process_name=proc_key,
+                    module_name=module_name,
+                    status="SUCCESS",
+                    message="File downloaded and verified in target folder.",
+                    attachment_path=success_shot,
+                    recipients=process_recipients,
+                    file_name=verified_name,
+                    folder_path=save_dir,
+                    file_size_kb=verified_size_kb,
+                )
+
             return True, ""
 
         except Exception as err:
             logger.error(f"❌ Failed: {module_name} error: {err}")
+
+            fail_shot = _capture_nsdl_screenshot(f"NSDL_FAILED_{proc_key}", page=page)
+            if email_enabled:
+                email_mgr.send_process_email(
+                    process_name=proc_key,
+                    module_name=module_name,
+                    status="FAILED",
+                    message=f"File download failed. Reason: {err}",
+                    attachment_path=fail_shot,
+                    recipients=process_recipients,
+                    file_name=None,
+                    folder_path=save_dir,
+                )
+
             return False, str(err)
 
         finally:

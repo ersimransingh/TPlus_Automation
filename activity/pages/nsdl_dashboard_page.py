@@ -6,6 +6,7 @@ from utils.logger_manager import LoggerManager
 
 logger = LoggerManager.get_logger()
 
+
 class DashboardPage:
     def __init__(self, page, locators):
         self.page = page
@@ -38,7 +39,6 @@ class DashboardPage:
     def _find_element_anywhere(self, xpath, timeout=10000):
         end_time = time.time() + (timeout / 1000.0)
         while time.time() < end_time:
-            # Check for SignOut.aspx on every lookup cycle
             self._check_session_expired()
             try:
                 if self.page.locator(xpath).count() > 0:
@@ -46,6 +46,8 @@ class DashboardPage:
                 for frame in self.page.frames:
                     if frame.locator(xpath).count() > 0:
                         return frame.locator(xpath)
+            except ConnectionError:
+                raise
             except Exception:
                 pass
             self.page.wait_for_timeout(300)
@@ -54,6 +56,7 @@ class DashboardPage:
     def _get_target_frame(self, xpath, timeout_seconds=15):
         end_time = time.time() + timeout_seconds
         while time.time() < end_time:
+            self._check_session_expired()
             for frame in self.page.frames:
                 try:
                     if frame.locator(xpath).count() > 0:
@@ -63,24 +66,10 @@ class DashboardPage:
             self.page.wait_for_timeout(500)
         return None
 
-    def _find_element_anywhere(self, xpath, timeout=10000):
-        end_time = time.time() + (timeout / 1000.0)
-        while time.time() < end_time:
-            try:
-                if self.page.locator(xpath).count() > 0:
-                    return self.page.locator(xpath)
-                for frame in self.page.frames:
-                    if frame.locator(xpath).count() > 0:
-                        return frame.locator(xpath)
-            except Exception:
-                pass
-            self.page.wait_for_timeout(300)
-        raise Exception(f"Element {xpath} never appeared in any frame.")
-
     def _resolve_date(self, date_str: str) -> str:
         if not date_str:
             return ""
-        
+
         date_str = str(date_str).strip().lower()
         today = datetime.now()
 
@@ -100,7 +89,7 @@ class DashboardPage:
                 return target_date.strftime("%d/%m/%Y")
             except Exception:
                 return today.strftime("%d/%m/%Y")
-        
+
         return date_str
 
     def navigate_to_master_module(self, module_name="Client Master"):
@@ -184,7 +173,7 @@ class DashboardPage:
             logger.info(f"👉 Selecting report option: '{label_name}'...")
             target_label = self._find_element_anywhere(target_label_xpath, timeout=4000)
             target_label.evaluate_all("elements => elements.forEach(el => el.click())")
-            
+
             logger.info("⏳ Waiting for ASP.NET PostBack / page reload to complete...")
             try:
                 self.page.wait_for_load_state("networkidle", timeout=10000)
@@ -192,6 +181,8 @@ class DashboardPage:
                 pass
             self.page.wait_for_timeout(3000)
             logger.info("✅ Page reloaded and stable.")
+        except ConnectionError:
+            raise
         except Exception as e:
             logger.info(f"ℹ️ Form does not require '{label_name}' selection or already set: {e}")
 
@@ -204,13 +195,11 @@ class DashboardPage:
                 field = self._find_element_anywhere(xpath, timeout=6000)
                 el = field.first
 
-                # 1. Strip readonly & set value into DOM + AjaxControlToolkit MaskedEdit Behavior
                 el.evaluate(f"""e => {{
                     e.removeAttribute('readonly');
                     e.removeAttribute('disabled');
                     e.readOnly = false;
 
-                    // Sync with AjaxControlToolkit MaskedEdit Extender if active
                     if (window.$find) {{
                         try {{
                             var behavior = window.$find(e.id);
@@ -220,16 +209,13 @@ class DashboardPage:
                         }} catch(err) {{}}
                     }}
 
-                    // Set standard DOM properties
                     e.value = '{target_val}';
                     e.setAttribute('value', '{target_val}');
 
-                    // Dispatch standard change events
                     e.dispatchEvent(new Event('input', {{ bubbles: true }}));
                     e.dispatchEvent(new Event('change', {{ bubbles: true }}));
                     e.dispatchEvent(new Event('blur', {{ bubbles: true }}));
 
-                    // Re-run ASP.NET validation so 'The date is invalid' clears
                     if (window.Page_ClientValidate) {{
                         try {{ window.Page_ClientValidate(); }} catch(err) {{}}
                     }}
@@ -238,13 +224,14 @@ class DashboardPage:
                 self.page.wait_for_timeout(500)
                 final_val = el.input_value()
                 logger.info(f"✅ [{label}] Successfully updated! Value on screen: '{final_val}'")
+            except ConnectionError:
+                raise
             except Exception as e:
                 logger.error(f"❌ Failed to set {label}: {e}")
 
         # --- A. ISIN Master (Requires Date + Time: DD/MM/YYYY HH:MM:SS) ---
         if "isin" in clean_name or "security" in clean_name:
             base_date = formatted_from or datetime.now().strftime("%d/%m/%Y")
-            # If time is not provided, append midnight 00:00:00 to satisfy the 19-character mask
             target_timestamp = f"{base_date} 00:00:00" if len(base_date) == 10 else base_date
             isin_xpath = "//input[contains(@id, 'txtLastDownLoadDate')] | //input[@type='text']"
             set_asp_masked_value(isin_xpath, target_timestamp, "ISIN Master Timestamp")
@@ -282,7 +269,6 @@ class DashboardPage:
         try:
             req_id_el = self._find_element_anywhere(req_id_xpath, timeout=5000)
             val = req_id_el.first.input_value().strip()
-            # If the box still contains a date timestamp, submission did not navigate away
             if val and not (":" in val and "/" in val):
                 request_id = val
             elif not request_id:
@@ -290,17 +276,19 @@ class DashboardPage:
                 if attr_val and not (":" in attr_val and "/" in attr_val):
                     request_id = attr_val
             logger.info(f"🆔 Extracted Request ID for '{module_name}': {request_id}")
+        except ConnectionError:
+            raise
         except Exception as e:
             logger.warning(f"⚠️ Could not extract Request ID for '{module_name}': {e}")
 
         return request_id
-           
+
     def _select_or_click(self, locator_key: str):
         """Helper to handle either dropdown selects or clickable navigation links."""
         xpath = self.locators.get(locator_key)
         if not xpath:
             raise KeyError(f"Locator key '{locator_key}' not found in locators configuration.")
-        
+
         element = self._find_element_anywhere(xpath, timeout=10000)
         tag = element.first.evaluate("el => el.tagName.toLowerCase()")
         if tag == "select":
@@ -321,7 +309,6 @@ class DashboardPage:
         self.page.wait_for_load_state("load")
         os.makedirs(download_dir, exist_ok=True)
 
-        # Wait for the menu frame to load after login
         initial_xpath = self.locators["uploads_menu_xpath"]
         target_frame = self._get_target_frame(initial_xpath, timeout_seconds=15)
         if target_frame:
@@ -333,7 +320,7 @@ class DashboardPage:
         menu_1.evaluate_all("elements => elements.forEach(el => el.dispatchEvent(new MouseEvent('mouseover', {bubbles: true})))")
         self.page.wait_for_timeout(1500)
 
-        # Step 2: Hover/Click 'Download and Status' -> (//b[text()="tatus"])[4]
+        # Step 2: Hover/Click 'Download and Status'
         status_xpath = self.locators.get("download_status_xpath", '(//b[text()="tatus"])[4]')
         logger.info(f"👉 Triggering 'Download and Status' menu ({status_xpath})...")
         menu_2 = self._find_element_anywhere(status_xpath, timeout=5000)
@@ -344,7 +331,7 @@ class DashboardPage:
         })""")
         self.page.wait_for_timeout(1500)
 
-        # Step 3: Click 'Download' -> //b[text()="Do"]
+        # Step 3: Click 'Download'
         download_sub_xpath = self.locators.get("download_sub_xpath", '//b[text()="Do"]')
         logger.info(f"👉 Clicking 'Download' option ({download_sub_xpath})...")
         menu_3 = self._find_element_anywhere(download_sub_xpath, timeout=5000)
@@ -377,7 +364,7 @@ class DashboardPage:
                         logger.info(f"✅ File ready for {id_type} Request ID '{current_id}'! Triggering download...")
                         with self.page.expect_download(timeout=90000) as download_info:
                             download_element.first.evaluate("node => node.click()")
-                        
+
                         download = download_info.value
                         saved_zip_path = os.path.join(download_dir, download.suggested_filename)
                         download.save_as(saved_zip_path)
@@ -389,6 +376,8 @@ class DashboardPage:
                             os.remove(saved_zip_path)
                             return os.path.join(download_dir, extracted_files[0]) if extracted_files else download_dir
                         return saved_zip_path
+                except ConnectionError:
+                    raise
                 except Exception:
                     pass
 
@@ -412,68 +401,56 @@ class DashboardPage:
         logger.info(f"Starting status polling (Poll Interval: {poll_interval}s | Refresh Limit: {refresh_limit})...")
 
         for refresh_count in range(refresh_limit + 1):
-            if self.page.is_closed():
-                raise ConnectionError("Browser window closed unexpectedly.")
+            self._check_session_expired()
 
-            for frame in self.page.frames:
-                try:
-                    if frame.locator(self.locators["user_id_xpath"]).count() > 0:
-                        raise ConnectionError("Session expired, redirected to login page.")
-                except Exception:
-                    pass
+            # Check if download link appears directly on current page
+            try:
+                download_element = self._find_element_anywhere(self.locators["download_link_xpath"], timeout=3000)
+                if download_element.count() > 0 and download_element.first.is_visible():
+                    logger.info("✅ File generated! 'Click here to download' is active.")
 
-            for refresh_count in range(refresh_limit + 1):
+                    with self.page.expect_download(timeout=90000) as download_info:
+                        download_element.first.evaluate("node => node.click()")
+
+                    download = download_info.value
+                    saved_zip_path = os.path.join(download_dir, download.suggested_filename)
+                    download.save_as(saved_zip_path)
+
+                    if zipfile.is_zipfile(saved_zip_path):
+                        with zipfile.ZipFile(saved_zip_path, "r") as zip_ref:
+                            zip_ref.extractall(download_dir)
+                            extracted_files = zip_ref.namelist()
+                        os.remove(saved_zip_path)
+                        return os.path.join(download_dir, extracted_files[0]) if extracted_files else download_dir
+                    return saved_zip_path
+            except ConnectionError:
+                raise
+            except Exception:
+                pass
+
+            if refresh_count >= refresh_limit:
+                break
+
+            logger.info(
+                f"[Refresh {refresh_count + 1}/{refresh_limit}] Status is still 'Requested'. "
+                f"Waiting {poll_interval}s before refresh..."
+            )
+
+            for _ in range(poll_interval):
                 self._check_session_expired()
-
-                # Check if download link appears directly on current page
-                try:
-                    download_element = self._find_element_anywhere(self.locators["download_link_xpath"], timeout=3000)
-                    if download_element.count() > 0 and download_element.first.is_visible():
-                        logger.info("✅ File generated! 'Click here to download' is active.")
-                        
-                        with self.page.expect_download(timeout=90000) as download_info:
-                            download_element.first.evaluate("node => node.click()")
-                        
-                        download = download_info.value
-                        saved_zip_path = os.path.join(download_dir, download.suggested_filename)
-                        download.save_as(saved_zip_path)
-
-                        extracted_files = []
-                        if zipfile.is_zipfile(saved_zip_path):
-                            with zipfile.ZipFile(saved_zip_path, "r") as zip_ref:
-                                zip_ref.extractall(download_dir)
-                                extracted_files = zip_ref.namelist()
-                            
-                            os.remove(saved_zip_path)
-                            return os.path.join(download_dir, extracted_files[0]) if extracted_files else download_dir
-                        else:
-                            return saved_zip_path
-                except ConnectionError:
-                    raise
-                except Exception:
-                    pass
-
-                if refresh_count >= refresh_limit:
-                    break
-
-                logger.info(
-                    f"[Refresh {refresh_count + 1}/{refresh_limit}] Status is still 'Requested'. "
-                    f"Waiting {poll_interval}s before refresh..."
-                )
-                
-                for _ in range(poll_interval):
-                    self._check_session_expired()
-                    self.page.wait_for_timeout(1000)
+                self.page.wait_for_timeout(1000)
 
             logger.info(f"Refreshing export status table ({refresh_count + 1}/{refresh_limit})...")
             try:
                 search_btn = self._find_element_anywhere(self.locators["search_btn_xpath"], timeout=10000)
                 search_btn.first.click(force=True)
                 self.page.wait_for_timeout(4000)
+            except ConnectionError:
+                raise
             except Exception as e:
                 logger.warning(f"⚠️ Search button interaction deferred ({e}).")
 
-        # Refreshes finished without link: Switch to inquiry search using the OLD request ID
+        # Refreshes finished without link: Switch to inquiry search using the Request ID
         if target_request_id:
             logger.warning(
                 f"⚠️ Link did not appear on page after {refresh_limit} refreshes. "
@@ -489,7 +466,6 @@ class DashboardPage:
 
         raise TimeoutError(f"File did not generate after {refresh_limit} refreshes and no Request ID was provided.")
 
-    
     def logout(self):
         """Cleanly logs out of NSDL DPM to terminate server session and release maker user ID."""
         logger.info("🔒 Attempting clean Logout to release user session...")
@@ -500,6 +476,5 @@ class DashboardPage:
             logout_btn.first.click(force=True)
             self.page.wait_for_timeout(2000)
             logger.info("✅ Successfully logged out. User ID released on server.")
-
         except Exception as e:
             logger.warning(f"⚠️ Logout interaction skipped or session already terminated: {e}")
