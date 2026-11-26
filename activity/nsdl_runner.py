@@ -15,7 +15,12 @@ from screenshot_util import capture_screenshot, BASE_SCREENSHOT_DIR
 
 logger = setup_logger()
 
-REQ_TRACKER_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "schedule_log", "nsdl_request_history.json")
+BASE_ACTIVITY_DIR = (
+    os.path.dirname(sys.executable)
+    if getattr(sys, "frozen", False)
+    else os.path.dirname(os.path.abspath(__file__))
+)
+REQ_TRACKER_FILE = os.path.join(BASE_ACTIVITY_DIR, "schedule_log", "nsdl_request_history.json")
 
 
 def _capture_nsdl_screenshot(prefix: str, page=None):
@@ -48,11 +53,15 @@ def get_previous_request_id(proc_key: str) -> str:
     try:
         with open(REQ_TRACKER_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
-        entry = data.get(proc_key, {})
+        norm_key = str(proc_key).strip().lower()
+        entry = next(
+            (v for k, v in data.items() if str(k).strip().lower() == norm_key),
+            {},
+        )
         if entry.get("date") == datetime.now().strftime("%Y-%m-%d"):
             return entry.get("current_request_id")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to read request history ({REQ_TRACKER_FILE}): {e}")
     return None
 
 
@@ -67,6 +76,11 @@ def record_request_ids(proc_key: str, req_id: str):
             with open(REQ_TRACKER_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
 
+        norm_key = str(proc_key).strip().lower()
+        for k in list(data.keys()):
+            if str(k).strip().lower() == norm_key and k != proc_key:
+                del data[k]
+
         data[proc_key] = {
             "current_request_id": str(req_id).strip(),
             "date": datetime.now().strftime("%Y-%m-%d"),
@@ -75,25 +89,35 @@ def record_request_ids(proc_key: str, req_id: str):
 
         with open(REQ_TRACKER_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
-        logger.info(f"💾 Recorded Pending Request ID -> '{req_id}'")
+        logger.info(f"💾 Recorded Pending Request ID -> '{req_id}' at {REQ_TRACKER_FILE}")
     except Exception as e:
         logger.warning(f"⚠️ Failed to record request ID: {e}")
 
 
 def clear_request_history(proc_key: str):
-    """Clears tracked IDs on successful download."""
+    """Clears tracked IDs on successful download and deletes the file if no entries remain."""
     try:
-        if os.path.exists(REQ_TRACKER_FILE):
-            with open(REQ_TRACKER_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            if proc_key in data:
-                del data[proc_key]
-                with open(REQ_TRACKER_FILE, "w", encoding="utf-8") as f:
-                    json.dump(data, f, indent=2)
-    except Exception:
-        pass
+        if not os.path.exists(REQ_TRACKER_FILE):
+            return
 
+        with open(REQ_TRACKER_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
 
+        norm_key = str(proc_key).strip().lower()
+        keys_to_remove = [k for k in data if str(k).strip().lower() == norm_key]
+        for k in keys_to_remove:
+            del data[k]
+
+        if not data:
+            os.remove(REQ_TRACKER_FILE)
+            logger.info(f"Deleted empty request history file: {REQ_TRACKER_FILE}")
+        elif keys_to_remove:
+            with open(REQ_TRACKER_FILE, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+            logger.info(f"Cleared Request ID for '{proc_key}' from {REQ_TRACKER_FILE}")
+    except Exception as e:
+        logger.warning(f"Failed to clear request history ({REQ_TRACKER_FILE}): {e}")
+        
 def execute_nsdl_process(proc_key: str, proc_config: dict, master_config: dict) -> tuple[bool, str]:
     global_settings = master_config.get("global_app_settings", {})
     locators = master_config.get("locators", {})
