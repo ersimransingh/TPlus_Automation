@@ -23,7 +23,7 @@ REM --- 3. Install dependencies ---
 echo [2/4] Installing Python packages...
 call venv\Scripts\activate.bat
 python -m pip install --upgrade pip --quiet
-pip install --quiet pywinauto pywin32 pillow pytesseract opencv-python pyautogui numpy schedule requests mss comtypes pyinstaller
+pip install --quiet pywinauto pywin32 pillow pytesseract opencv-python pyautogui numpy schedule requests mss comtypes playwright pyinstaller
 
 REM --- 4. Check Tesseract OCR (external dependency, not pip-installable) ---
 echo [3/4] Checking Tesseract OCR...
