@@ -134,7 +134,8 @@ def execute_nsdl_process(proc_key: str, proc_config: dict, master_config: dict) 
     
     # 2. Download directory setup
     base_path = proc_config.get("main_path", global_settings.get("main_download_path", "C:\\NSDLFILES"))
-    folder_date = resolve_date(date_from_token or "t").strftime("%Y-%m-%d")
+    folder_fmt = proc_config.get("folder_date_format", global_settings.get("folder_date_format", "%d%b%Y"))
+    folder_date = resolve_date(date_from_token or "t").strftime(folder_fmt)
     save_dir = os.path.join(base_path, folder_date)
     os.makedirs(save_dir, exist_ok=True)
 
